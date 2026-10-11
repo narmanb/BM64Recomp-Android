@@ -1,9 +1,14 @@
 #include "zelda_support.h"
 #include <SDL.h>
+#ifndef __ANDROID__
 #include "nfd.h"
+#else
+#include "android_support.h"
+#endif
 #include "RmlUi/Core.h"
 
 namespace zelda64 {
+#ifndef __ANDROID__
     // MARK: - Internal Helpers
     void perform_file_dialog_operation(const std::function<void(bool, const std::filesystem::path&)>& callback) {
         nfdnchar_t* native_path = nullptr;
@@ -43,10 +48,13 @@ namespace zelda64 {
         callback(success, paths);
     }
 
+#endif
     // MARK: - Public API
 
     std::filesystem::path get_program_path() {
-#if defined(__APPLE__)
+#if defined(__ANDROID__)
+        return std::filesystem::path{std::getenv("APP_FOLDER_PATH")};
+#elif defined(__APPLE__)
         return get_bundle_resource_directory();
 #elif defined(__linux__) && defined(RECOMP_FLATPAK)
         return "/app/bin";
@@ -60,7 +68,11 @@ namespace zelda64 {
     }
 
     void open_file_dialog(std::function<void(bool success, const std::filesystem::path& path)> callback) {
-#ifdef __APPLE__
+#ifdef __ANDROID__
+        bm64::android::open_document(false,[callback](bool ok,const std::list<std::filesystem::path>& paths){
+            callback(ok && !paths.empty(),paths.empty()?std::filesystem::path{}:paths.front());
+        });
+#elif defined(__APPLE__)
         dispatch_on_ui_thread([callback]() {
             perform_file_dialog_operation(callback);
         });
@@ -70,7 +82,9 @@ namespace zelda64 {
     }
 
     void open_file_dialog_multiple(std::function<void(bool success, const std::list<std::filesystem::path>& paths)> callback) {
-#ifdef __APPLE__
+#ifdef __ANDROID__
+        bm64::android::open_document(true,std::move(callback));
+#elif defined(__APPLE__)
         dispatch_on_ui_thread([callback]() {
             perform_file_dialog_operation_multiple(callback);
         });

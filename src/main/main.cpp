@@ -8,16 +8,22 @@
 #include <stdexcept>
 #include <cinttypes>
 
+#ifndef __ANDROID__
 #include "nfd.h"
+#else
+#include "android_support.h"
+#endif
 
 #include "ultramodern/ultra64.h"
 #include "ultramodern/ultramodern.hpp"
+#ifndef __ANDROID__
 #define SDL_MAIN_HANDLED
+#endif
 #ifdef _WIN32
 #include "SDL.h"
 #else
-#include "SDL2/SDL.h"
-#include "SDL2/SDL_syswm.h"
+#include "SDL.h"
+#include "SDL_syswm.h"
 // Undefine x11 macros that get included by SDL_syswm.h.
 #undef None
 #undef Status
@@ -77,7 +83,7 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) > 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         exit_error("Failed to initialize SDL2: %s\n", SDL_GetError());
     }
 
@@ -147,7 +153,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 #endif
 
     window = SDL_CreateWindow("Bomberman 64: Recompiled", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1600, 960,  flags);
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
     SetImageAsIcon("icons/512.png",window);
     if (ultramodern::renderer::get_graphics_config().wm_option == ultramodern::renderer::WindowMode::Fullscreen) { // TODO: Remove once RT64 gets native fullscreen support on Linux
         SDL_SetWindowFullscreen(window,SDL_WINDOW_FULLSCREEN_DESKTOP);
@@ -528,7 +534,12 @@ void reorder_texture_pack(recomp::mods::ModContext&) {
 
 #define REGISTER_FUNC(name) recomp::overlays::register_base_export(#name, name)
 
+#ifdef __ANDROID__
+extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char** argv) {
+    bm64::android::initialize();
+#else
 int main(int argc, char** argv) {
+#endif
     (void)argc;
     (void)argv;
     recomp::Version project_version{};
@@ -540,7 +551,11 @@ int main(int argc, char** argv) {
     // Map this executable into memory and lock it, which should keep it in physical memory. This ensures
     // that there are no stutters from the OS having to load new pages of the executable whenever a new code page is run.
     PreloadContext preload_context;
+    #ifdef __ANDROID__
+    bool preloaded = false;
+    #else
     bool preloaded = preload_executable(preload_context);
+    #endif
 
     if (!preloaded) {
         fprintf(stderr, "Failed to preload executable!\n");
@@ -698,9 +713,14 @@ int main(int argc, char** argv) {
         .message_queue_control = {},
     };
 
+    #ifdef __ANDROID__
+    bm64::android::startup_stage("Starting recompiled runtime");
+    #endif
     recomp::start(cfg);
 
+    #ifndef __ANDROID__
     NFD_Quit();
+    #endif
 
     if (preloaded) {
         release_preload(preload_context);

@@ -1,3 +1,6 @@
+#ifdef __ANDROID__
+#include "android_pad.h"
+#endif
 #include <array>
 
 #include "librecomp/helpers.hpp"
@@ -108,6 +111,13 @@ bool recomp::get_n64_input(int controller_num, uint16_t* buttons_out, float* x_o
                 - recomp::get_input_analog(keyboard_input_mappings[(size_t)GameInput::Y_AXIS_NEG]) + joystick_y;
     }
 
+#ifdef __ANDROID__
+    if(!recomp::game_input_disabled()) {
+        const auto physical=bm64::android::shape({cur_buttons,cur_x,cur_y},bm64::android::physical_sensitivity());
+        const auto mixed=bm64::android::merge(physical,bm64::android::touch_state());
+        cur_buttons=mixed.buttons;cur_x=mixed.x;cur_y=mixed.y;
+    }
+#endif
     *buttons_out = cur_buttons;
     *x_out = std::clamp(cur_x * 0.65f, -1.0f, 1.0f);
     *y_out = std::clamp(cur_y * 0.65f, -1.0f, 1.0f);

@@ -1,3 +1,11 @@
+#ifdef __ANDROID__
+#include "android_support.h"
+#include "android_window_handoff.h"
+#include "zelda_config.h"
+#include <android/native_window.h>
+#include <SDL.h>
+#include <SDL_syswm.h>
+#endif
 #include <memory>
 #include <cstring>
 #include <variant>
@@ -210,7 +218,11 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     RT64::Application::Core appCore{};
 #if defined(_WIN32)
     appCore.window = window_handle.window;
-#elif defined(__linux__) || defined(__ANDROID__)
+#elif defined(__ANDROID__)
+    SDL_SysWMinfo wm{};SDL_VERSION(&wm.version);
+    if(!SDL_GetWindowWMInfo(window_handle,&wm))throw std::runtime_error(SDL_GetError());
+    appCore.window=wm.info.android.window;
+#elif defined(__linux__)
     appCore.window = window_handle;
 #elif defined(__APPLE__)
     appCore.window.window = window_handle.window;
@@ -255,6 +267,11 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     // Set up the RT64 application configuration fields.
     RT64::ApplicationConfiguration appConfig;
     appConfig.useConfigurationFile = false;
+#ifdef __ANDROID__
+    appConfig.detectDataPath=false;
+    appConfig.dataPath=(zelda64::get_app_folder_path()/"rt64").string();
+    bm64::android::startup_stage("Creating RT64 in private storage");
+#endif
 
     // Create the RT64 application.
     app = std::make_unique<RT64::Application>(appCore, appConfig);
@@ -263,6 +280,9 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     auto& cur_config = ultramodern::renderer::get_graphics_config();
     set_application_user_config(app.get(), cur_config);
     app->userConfig.developerMode = debug;
+#ifdef __ANDROID__
+    app->userConfig.graphicsAPI=RT64::UserConfiguration::GraphicsAPI::Vulkan;
+#endif
     // Force gbi depth branches to prevent LODs from kicking in.
     app->enhancementConfig.f3dex.forceBranch = true;
     // Set postBlendNoiseNegative
@@ -285,6 +305,10 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
             break;
     }
 
+    #ifdef __ANDROID__
+    app->userConfig.graphicsAPI=RT64::UserConfiguration::GraphicsAPI::Vulkan;
+    bm64::android::startup_stage("RT64 Vulkan setup");
+    #endif
     // Set up the RT64 application.
     uint32_t thread_id = 0;
 #ifdef _WIN32
@@ -328,6 +352,11 @@ void zelda64::renderer::RT64Context::send_dl(const OSTask* task) {
 }
 
 void zelda64::renderer::RT64Context::update_screen() {
+#ifdef __ANDROID__
+    if(auto* native=static_cast<ANativeWindow*>(bm64::android::take_window())) {
+        bm64::android::handoff_window(native,app ? app->swapChain.get() : nullptr,ANativeWindow_release);
+    }
+#endif
     app->updateScreen();
 }
 

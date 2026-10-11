@@ -1,3 +1,5 @@
+#include <atomic>
+static std::atomic_bool android_menu_capturing{true};
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <SDL_video.h>
@@ -577,6 +579,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
     using clock = std::chrono::system_clock;
 
     // TODO move these into a more appropriate place.
+    android_menu_capturing.store(recompui::is_context_capturing_input(),std::memory_order_relaxed);
     constexpr clock::duration start_repeat_delay = std::chrono::milliseconds{500};
     constexpr clock::duration repeat_rate = std::chrono::milliseconds{50};
     static clock::time_point next_repeat_time = {};
@@ -1010,3 +1013,5 @@ void recompui::drop_files(const std::list<std::filesystem::path> &file_list) {
         );
     }
 }
+
+bool recompui::is_context_capturing_input_snapshot() { return android_menu_capturing.load(std::memory_order_relaxed); }

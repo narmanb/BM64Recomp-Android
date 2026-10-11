@@ -34,6 +34,31 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
     cmake_policy(SET CMP0135 NEW)
 endif()
 
+# Android has separate host generation and target compilation.
+if(ANDROID)
+    option(BM64_FOUNDATION "Build the ROM-free input/settings test library" OFF)
+    option(BM64_DEPENDENCY_PROBE "Build Android renderer/runtime dependencies without generated game" OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    add_library(BM64Platform SHARED src/main/android_touch.cpp)
+    target_include_directories(BM64Platform PRIVATE include)
+    target_compile_definitions(BM64Platform PRIVATE BM64_FOUNDATION)
+    target_link_options(BM64Platform PRIVATE "-Wl,-z,max-page-size=16384")
+    if(BM64_FOUNDATION)
+        return()
+    endif()
+    if(NOT BM64_DEPENDENCY_PROBE)
+        foreach(required RecompiledFuncs/funcs.h RecompiledFuncs/recomp_overlays.inl
+                RecompiledPatches/patches.c RecompiledPatches/patches_bin.c
+                RecompiledPatches/patches_bin.h RecompiledPatches/funcs.h
+                RecompiledPatches/recomp_overlays.inl rsp/aspMain.cpp)
+            if(NOT EXISTS "${CMAKE_SOURCE_DIR}/${required}")
+                message(FATAL_ERROR "Missing ${required}. Run tools/build_host_tools.sh and tools/prepare_sources.py with retail AND decompressed USA ROMs. See docs/ANDROID_PORT.md.")
+            endif()
+        endforeach()
+    endif()
+    include(android/cmake/dependencies.cmake)
+endif()
+
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -63,8 +88,10 @@ target_compile_definitions(rmlui_core PRIVATE LUNASVG_BUILD_STATIC)
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/lib/N64ModernRuntime)
 
+
 target_include_directories(rt64 PRIVATE ${CMAKE_BINARY_DIR}/rt64/src)
 
+if(NOT BM64_DEPENDENCY_PROBE)
 # RecompiledFuncs - Library containing the primary recompiler output
 add_library(RecompiledFuncs STATIC)
 
@@ -111,6 +138,7 @@ target_sources(PatchesLib PRIVATE
 
 set_source_files_properties(${CMAKE_SOURCE_DIR}/RecompiledPatches/patches.c PROPERTIES COMPILE_FLAGS -fno-strict-aliasing)
 
+if(NOT ANDROID)
 # Build patches elf
 if(NOT DEFINED PATCHES_C_COMPILER)
     set(PATCHES_C_COMPILER clang)
@@ -144,8 +172,22 @@ add_custom_command(OUTPUT
                    DEPENDS ${CMAKE_SOURCE_DIR}/patches/patches.elf
 )
 
+endif()
+
+endif()
+
 # Main executable
-add_executable(BM64Recompiled)
+if(ANDROID AND BM64_DEPENDENCY_PROBE)
+    add_library(BM64Recompiled OBJECT)
+    target_sources(BM64Recompiled PRIVATE src/main/android_glue.cpp src/main/android_touch.cpp)
+elseif(ANDROID)
+    add_library(BM64Recompiled SHARED)
+    set_target_properties(BM64Recompiled PROPERTIES OUTPUT_NAME BM64)
+    target_link_options(BM64Recompiled PRIVATE "-Wl,-z,max-page-size=16384")
+    target_sources(BM64Recompiled PRIVATE src/main/android_glue.cpp src/main/android_touch.cpp)
+else()
+    add_executable(BM64Recompiled)
+endif()
 
 set (SOURCES
     ${CMAKE_SOURCE_DIR}/src/main/main.cpp
@@ -204,6 +246,11 @@ set (SOURCES
 
     ${CMAKE_SOURCE_DIR}/lib/RmlUi/Backends/RmlUi_Platform_SDL.cpp
 )
+
+if(BM64_DEPENDENCY_PROBE)
+    list(REMOVE_ITEM SOURCES ${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp
+        ${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp ${CMAKE_SOURCE_DIR}/src/main/register_patches.cpp)
+endif()
 
 if (APPLE)
     list(APPEND SOURCES ${CMAKE_SOURCE_DIR}/src/main/support_apple.mm)
@@ -311,7 +358,7 @@ if (APPLE)
     include(${CMAKE_SOURCE_DIR}/.github/macos/apple_bundle.cmake)
 endif()
 
-if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND NOT ANDROID)
     find_package(SDL2 REQUIRED)
     find_package(X11 REQUIRED)
 
@@ -353,15 +400,20 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_link_libraries(BM64Recompiled PRIVATE "-latomic -static-libstdc++" ${CMAKE_DL_LIBS} Threads::Threads)
 endif()
 
+if(ANDROID)
+    target_link_libraries(BM64Recompiled PRIVATE SDL2::SDL2 freetype android log atomic)
+    target_compile_definitions(BM64Recompiled PRIVATE __ANDROID__)
+endif()
+
 target_link_libraries(BM64Recompiled PRIVATE
-    PatchesLib
-    RecompiledFuncs
+    $<$<NOT:$<BOOL:${BM64_DEPENDENCY_PROBE}>>:PatchesLib>
+    $<$<NOT:$<BOOL:${BM64_DEPENDENCY_PROBE}>>:RecompiledFuncs>
     librecomp
     ultramodern
     rt64
     RmlUi::Core
     RmlUi::Debugger
-    nfd
+    $<$<NOT:$<BOOL:${ANDROID}>>:nfd>
     lunasvg
 )
 
@@ -389,7 +441,7 @@ else()
             set(SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/spirv-cross/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64//src/contrib/spirv-cross/bin/x64/spirv-cross")
         endif()
     else()
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+        if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
             set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxc-linux")
         else()
             set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/arm64/dxc-linux")

@@ -25,20 +25,35 @@ constexpr std::u8string_view controls_filename = u8"controls.json";
 constexpr std::u8string_view sound_filename = u8"sound.json";
 constexpr std::u8string_view cheats_filename = u8"cheats.json";
 
-constexpr auto res_default            = ultramodern::renderer::Resolution::Auto;
-constexpr auto hr_default             = ultramodern::renderer::HUDRatioMode::Clamp16x9;
-constexpr auto api_default            = ultramodern::renderer::GraphicsApi::Auto;
-constexpr auto ar_default             = ultramodern::renderer::AspectRatio::Original;
+
+#ifdef __ANDROID__
+constexpr auto api_default = ultramodern::renderer::GraphicsApi::Vulkan;
+constexpr auto ar_default = ultramodern::renderer::AspectRatio::Expand;
+constexpr auto res_default = ultramodern::renderer::Resolution::Original2x;
+constexpr auto msaa_default = ultramodern::renderer::Antialiasing::None;
+constexpr bool developer_mode_default = false;
+#else
+constexpr auto api_default = ultramodern::renderer::GraphicsApi::Auto;
+constexpr auto ar_default = ultramodern::renderer::AspectRatio::Original;
+constexpr auto res_default = ultramodern::renderer::Resolution::Auto;
 constexpr auto msaa_default           = ultramodern::renderer::Antialiasing::MSAA2X;
+
+
+
+constexpr bool developer_mode_default = true;
+#endif
+
+constexpr auto hr_default             = ultramodern::renderer::HUDRatioMode::Clamp16x9;
 constexpr auto rr_default             = ultramodern::renderer::RefreshRate::Manual;
 constexpr auto hpfb_default           = ultramodern::renderer::HighPrecisionFramebuffer::Auto;
 constexpr int ds_default              = 1;
 constexpr int rr_manual_default       = 60;
-constexpr bool developer_mode_default = true;
-
 static bool is_steam_deck = false;
 
 ultramodern::renderer::WindowMode wm_default() {
+    #ifdef __ANDROID__
+    return ultramodern::renderer::WindowMode::Fullscreen;
+    #endif
     return is_steam_deck ? ultramodern::renderer::WindowMode::Fullscreen : ultramodern::renderer::WindowMode::Windowed;
 }
 
@@ -134,6 +149,11 @@ namespace recomp {
 }
 
 std::filesystem::path zelda64::get_app_folder_path() {
+#ifdef __ANDROID__
+    const char* app_path=std::getenv("APP_FOLDER_PATH");
+    if(!app_path || !*app_path)throw std::runtime_error("Android app storage was not initialized");
+    return app_path;
+#endif
    // directly check for portable.txt (windows and native linux binary)
    if (std::filesystem::exists("portable.txt")) {
        return std::filesystem::current_path();

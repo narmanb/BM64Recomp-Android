@@ -1,3 +1,7 @@
+#ifdef __ANDROID__
+#include "android_pad.h"
+#include "android_support.h"
+#endif
 #include <atomic>
 #include <mutex>
 
@@ -299,6 +303,9 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
 }
 
 void recomp::handle_events() {
+#ifdef __ANDROID__
+    bm64::android::dispatch_document_result();
+#endif
     SDL_Event cur_event;
     static bool started = false;
     static bool exited = false;
@@ -464,6 +471,9 @@ const recomp::DefaultN64Mappings recomp::default_n64_controller_mappings = {
 };
 
 void recomp::poll_inputs() {
+#ifdef __ANDROID__
+    bm64::android::poll_touch();
+#endif
     InputState.keys = SDL_GetKeyboardState(&InputState.numkeys);
     InputState.keymod = SDL_GetModState();
 
@@ -730,6 +740,9 @@ void recomp::set_right_analog_suppressed(bool suppressed) {
 }
 
 bool recomp::game_input_disabled() {
+#ifdef __ANDROID__
+    if(!bm64::android::is_foreground())return true;
+#endif
     // Disable input if any menu that blocks input is open.
     return recompui::is_context_capturing_input();
 }
