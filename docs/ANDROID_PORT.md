@@ -86,7 +86,8 @@ Host generation: follow upstream `BUILDING.md`, build
 `build/bm64.z64` has documented MD5 `d2f9313cccae0af85d23ac37666c0173`.
 Pass this separately; `tools/prepare_sources.py` never uses retail bytes as generation
 input. The MD5 is the decomp project's compatibility identifier, not a security claim.
-No user ROM or generated game sources are present in this cloud session.
+No user ROM or generated game/RSP sources are present in this cloud session.
+The existing GPL patches were separately generated without a ROM and are ignored by Git.
 The full `./android/gradlew -p android assembleDebug` was attempted and fails at
 `Missing RecompiledFuncs/funcs.h`; it does not produce a game APK.
 
@@ -103,7 +104,8 @@ Gradle8.11.1/AGP8.9.2. Set `ANDROID_HOME`, `JAVA_HOME`, and put SDK CMake/Ninja,
 JDK bin and host clang/lld in PATH. Install host LLVM with **MIPS support** (for
 example your Linux distribution's clang/lld packages): NDK28's host-running clang
 only contains Android/WASM/BPF targets and cannot compile the MIPS patches.
-This session built the host recompiler tools but did not install host MIPS LLVM.
+This session built the host recompiler tools and used Debian host LLVM19.1.7
+(19.1.7-3+b1), extracted into a user-owned tools directory, to build MIPS patches.
 Minimum API28 (aligned_alloc dependencies).
 NDK28 and 16 KiB ELF/ZIP alignment support newer Android page sizes.
 
@@ -134,15 +136,19 @@ python3 tools/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk --
 # Omit --foundation for the full game APK.
 ```
 
-Build renderer/runtime/frontend objects without game data (this does NOT link a game):
+Build renderer/runtime/frontend objects without game data (this does NOT link a game).
+The optional patch step needs host LLVM with MIPS support; `PATCH_CC`/`PATCH_LD`
+can select versioned compiler/linker executables. Existing patch source is GPL code
+and this step does not read either ROM:
 
 ```sh
+tools/prepare_patches.py
 cmake -S . -B build-android-deps -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/28.2.13676358/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DANDROID_STL=c++_shared \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBM64_DEPENDENCY_PROBE=ON \
   -DBM64_FILE_TO_C="$PWD/build-host-tools/file_to_c"
-cmake --build build-android-deps --target BM64Recompiled rt64 ultramodern BM64Platform -j2
+cmake --build build-android-deps --target BM64Recompiled PatchesLib rt64 ultramodern BM64Platform -j2
 ```
 
 Android configure applies revision-checked patches idempotently and refuses conflicts.
@@ -196,8 +202,11 @@ This session used JDK17 and a local Gradle user-home configuration (not committe
   no ROM payload checks passed.
 - ARM64 dependency/frontend probe cross-build succeeded: BM64 frontend/main objects,
   SDL2, FreeType, RmlUi, Plume, RT64, ultramodern and BM64Platform. This is an object/
-  dependency check, **not a game link**. Generated overlays/RSP/game/patch code were
+  dependency check, **not a game link**. Generated game overlays/RSP/game code were
   excluded; their link/package still requires the generation inputs above.
+  A later ROM-free patch generation/check compiled the original MIPS patches,
+  recompiled 347 functions, embedded the patch binary, and cross-compiled both
+  generated patch objects and their frontend registration for ARM64.
 - Dependency patches were reversed/reapplied and checked for idempotence. Pins stay
   at the audited upstream revisions. Clean desktop dependency sources can be restored.
 - Independent code review findings addressed: settings across processes, menu event

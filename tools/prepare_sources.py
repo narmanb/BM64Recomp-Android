@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -70,8 +69,8 @@ def main():
         raise ValueError('Generation needs --decompressed /path/to/build/bm64.z64. Retail ROM is only for runtime.')
     for tool in ('N64Recomp', 'RSPRecomp', 'build-host-tools/file_to_c'):
         if not os.access(ROOT/tool, os.X_OK): raise ValueError(f'Missing executable host tool: {tool}; run tools/build_host_tools.sh')
-    for tool in ('clang', 'ld.lld', 'make'):
-        if not shutil.which(tool): raise ValueError(f'Missing host tool: {tool}')
+    from prepare_patches import check_requirements
+    check_requirements()
     if not (ROOT/'BM64Syms/dump.toml').is_file(): raise ValueError('Initialize recursive submodules')
     # Never copy the retail ROM to generation input, nor package either ROM.
     dest = ROOT/'bm64.decomp.us.z64'
@@ -84,10 +83,7 @@ def main():
     (ROOT/'RecompiledPatches').mkdir(exist_ok=True)
     run([ROOT/'N64Recomp', 'bm64.us.toml'])
     run([ROOT/'RSPRecomp', 'aspMain.toml'])
-    run(['make', '-C', 'patches', 'CC=clang', 'LD=ld.lld'])
-    run([ROOT/'N64Recomp', 'patches.toml'])
-    run([ROOT/'build-host-tools/file_to_c', 'patches/patches.bin', 'mm_patches_bin',
-         'RecompiledPatches/patches_bin.c', 'RecompiledPatches/patches_bin.h'])
+    run([ROOT/'tools/prepare_patches.py'])
     print('Generated game/RSP/patch sources; not an APK build')
 
 

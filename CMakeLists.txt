@@ -114,6 +114,10 @@ file(GLOB FUNC_CXX_SOURCES ${CMAKE_SOURCE_DIR}/RecompiledFuncs/*.cpp)
 
 target_sources(RecompiledFuncs PRIVATE ${FUNC_C_SOURCES} ${FUNC_CXX_SOURCES})
 
+endif()
+
+# Patches themselves are original source and can also be generated without a ROM.
+if(NOT BM64_DEPENDENCY_PROBE OR (ANDROID AND EXISTS "${CMAKE_SOURCE_DIR}/RecompiledPatches/patches.c"))
 # PatchesLib - Library containing the recompiled output for any custom function patches
 add_library(PatchesLib STATIC)
 
@@ -249,7 +253,10 @@ set (SOURCES
 
 if(BM64_DEPENDENCY_PROBE)
     list(REMOVE_ITEM SOURCES ${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp
-        ${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp ${CMAKE_SOURCE_DIR}/src/main/register_patches.cpp)
+        ${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp)
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/RecompiledPatches/recomp_overlays.inl")
+        list(REMOVE_ITEM SOURCES ${CMAKE_SOURCE_DIR}/src/main/register_patches.cpp)
+    endif()
 endif()
 
 if (APPLE)
