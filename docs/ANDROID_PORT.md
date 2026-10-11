@@ -249,7 +249,7 @@ adb install -r /path/to/BM64-Android-debug.apk
 - Independent code review findings addressed: settings across processes, menu event
   independence, unsupported launcher menu-axis/D-pad bindings, corrupt sensitivity
   values, surface failure retries. Landscape touch settings use a scrollable dialog.
-- Full game/RSP/patch generation succeeded. All 1,487 generated game C translation
+- Full game/RSP/patch generation succeeded. All 1,486 generated game C translation
   units, generated overlays and RSP, frontend/runtime, SDL and Vulkan/RT64 compiled
   for ARM64. The initial final link exposed an incorrect FindFreetype imported
   location (`freetype` as a filename); an Android `Freetype::Freetype` alias to the
