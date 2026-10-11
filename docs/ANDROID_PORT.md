@@ -7,9 +7,16 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 
 ## Current status
 
-A debug-signed **foundation APK** builds directly in this cloud environment. It is
-**not playable**: Start Game is disabled. It exercises launcher/ROM import,
-settings, native ARM64 touch input and a controller event/layout preview.
+The **full native ARM64 debug APK now builds** directly in this cloud environment
+(2026-10-11). Package `com.narmanb.bm64`, version `1.0.0-android.1`, minimum API28.
+The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
+SDL2 and the Android launcher/control system are packaged. Start is enabled after
+importing a compatible retail ROM. The ROM is **not bundled**.
+
+APK SHA-256: `75649b7f1ade839c2ced6d9ab590b40f07677d943525031bc002ff1fa56a734d`.
+This is the first full build for device testing, **not verified playable/stable**.
+No Android device is attached here. The separate ROM-free foundation APK remains
+available for launcher/settings/control-preview testing, with Start disabled.
 
 Implemented source:
 
@@ -74,7 +81,7 @@ Hero's frontend submodule is not reused wholesale: BM64 owns frontend code here.
 Goemon's reveal-on-touch Automatic mode, SDL touch mappings and rectangle heuristics
 are not copied; BM64's controller-independent touch labels and graphics patches stand.
 
-## ROM distinction and missing inputs
+## ROM inputs and source generation
 
 Runtime/import: **Bomberman 64 (USA)** retail, 8 MiB, normalized big-endian SHA-1:
 `8a7648d8105ac4fc1ad942291b2ef89aeca921c9`.
@@ -86,10 +93,13 @@ Host generation: follow upstream `BUILDING.md`, build
 `build/bm64.z64` has documented MD5 `d2f9313cccae0af85d23ac37666c0173`.
 Pass this separately; `tools/prepare_sources.py` never uses retail bytes as generation
 input. The MD5 is the decomp project's compatibility identifier, not a security claim.
-No user ROM or generated game/RSP sources are present in this cloud session.
-The existing GPL patches were separately generated without a ROM and are ignored by Git.
-The full `./android/gradlew -p android assembleDebug` was attempted and fails at
-`Missing RecompiledFuncs/funcs.h`; it does not produce a game APK.
+The user supplied a retail USA dump on 2026-10-11. Its SHA-1 and runtime XXH3 both
+match the expected version. Bomberhackers' decompressor at
+`c7c5fd5a73a9d5969673535030fc4f1df956fa5f` produced bytes matching the exact expected
+MD5 above, so a full decompilation rebuild was unnecessary for this dump. Game/RSP
+and patch generation completed; all inputs/outputs remain private and ignored by Git.
+Earlier ROM-free builds stopped at `Missing RecompiledFuncs/funcs.h`; that blocker
+is resolved for this session. New clean checkouts still need local generation.
 
 Required generated outputs: `RecompiledFuncs/*.c`, `funcs.h`, `recomp_overlays.inl`;
 `rsp/aspMain.cpp`; `RecompiledPatches/patches.c`, `patches_bin.c`, `patches_bin.h`,
@@ -117,6 +127,19 @@ python3 tools/prepare_sources.py /path/to/retail.z64 --check-only
 python3 tools/prepare_sources.py /path/to/retail.z64 --decompressed /path/to/bm64/build/bm64.z64
 cd android
 ./gradlew assembleDebug
+```
+
+For the validated big-endian retail dump, this shorter host-only decompression
+path produced the exact required generation ROM. The tool remains external to the
+Android application. Validate its output with `prepare_sources.py` before generation:
+
+```sh
+git clone https://github.com/Bomberhackers/bm64.git build-host-tools/bm64-decomp
+git -C build-host-tools/bm64-decomp checkout c7c5fd5a73a9d5969673535030fc4f1df956fa5f
+make -C build-host-tools/bm64-decomp/tools
+build-host-tools/bm64-decomp/tools/bm64decompress /path/to/retail.z64 /path/to/decompressed.z64
+python3 tools/prepare_sources.py /path/to/retail.z64 --decompressed /path/to/decompressed.z64
+./android/gradlew -p android assembleDebug
 ```
 
 ROM-free, separately identified foundation APK:
@@ -160,10 +183,24 @@ Cloud networking: Gradle needs Java HTTP/HTTPS proxy properties matching the man
 HTTP proxy and the supplied CA trust store; preserve the environment proxy route.
 This session used JDK17 and a local Gradle user-home configuration (not committed).
 
+## Device installation / first test
+
+Install the full APK (`android/app/build/outputs/apk/debug/app-debug.apk`, also copied
+locally to `build-apk/BM64-Android-debug.apk`). It uses a different package/storage
+from the foundation build, so import the retail ROM again in **Select USA ROM**.
+Tap **Start**, then **Start Game** in the retained native frontend. Touchscreen
+settings/layout editor are available from the Android launcher; Android Back in
+the game also exposes touch settings, including recovery from Completely Off.
+If launch closes unexpectedly, reopen the launcher and **Save crash report**.
+
+```sh
+adb install -r /path/to/BM64-Android-debug.apk
+```
+
 ## Known issues / next steps
 
-1. Supply the separately required user ROM and decompressed generation input locally;
-   generate and link the actual native game, verify game JNI/SDL exports/package.
+1. Run the first physical-device test; build/package validation is complete but
+   runtime initialization and gameplay remain unverified.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;
@@ -182,12 +219,12 @@ This session used JDK17 and a local Gradle user-home configuration (not committe
 
 ## Verification log
 
-- Python ROM tests: 4 passed, real-ROM test skipped (no ROM).
+- Python ROM tests: all 5 passed, including the uploaded USA ROM.
 - Java touch harness: visibility policy, layout/settings round trips, opacity-independent
   input, analog partial movement, simultaneous/multiple-pointer buttons, release/cancel,
   corrupt settings clamping and safe-area geometry passed.
 - Java importer harness: invalid/truncated/oversized/raw/ZIP rejection preserves previous
-  file; real retail/byte-swapped/ZIP acceptance is opt-in and untested here.
+  file; real retail z64/v64/n64 and ZIP acceptance passed with the uploaded dump.
 - Java cross-process settings harness: fresh external changes, layout retention,
   mode/opacity independence, corrupt-file recovery and temporary-file cleanup pass.
 - C++ actual frontend controller defaults: face/shoulder/trigger/C/D-pad/Start/menu
@@ -212,5 +249,15 @@ This session used JDK17 and a local Gradle user-home configuration (not committe
 - Independent code review findings addressed: settings across processes, menu event
   independence, unsupported launcher menu-axis/D-pad bindings, corrupt sensitivity
   values, surface failure retries. Landscape touch settings use a scrollable dialog.
-- No Android device attached; RP5/S25+ results remain **not tested**. Foundation APK
-  can be installed for launcher/settings/control-preview testing only.
+- Full game/RSP/patch generation succeeded. All 1,487 generated game C translation
+  units, generated overlays and RSP, frontend/runtime, SDL and Vulkan/RT64 compiled
+  for ARM64. The initial final link exposed an incorrect FindFreetype imported
+  location (`freetype` as a filename); an Android `Freetype::Freetype` alias to the
+  built target fixes it. The subsequent full Gradle `assembleDebug` succeeded.
+- Full APK signature v2, expected package/launcher/API28/ARM64 ABI, game/preview touch
+  JNI exports, lifecycle/import JNI exports, SDL_main, ELF/ZIP16 KiB alignment,
+  fonts/controller database, ZIP integrity and ROM exclusion checks passed.
+  `PLAYABLE=true` generated configuration verified; game dependencies resolve to
+  bundled SDL2/C++ shared libraries and Android platform libraries.
+- No Android device attached (`adb devices` empty); RP5/S25+ title screen, gameplay,
+  audio, saves, touch/physical behavior, Vulkan/lifecycle and FPS remain **not tested**.
