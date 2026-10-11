@@ -26,6 +26,12 @@ set(BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(freetype GIT_REPOSITORY https://github.com/freetype/freetype.git
     GIT_TAG 534ad3456055ee1f65ecde3bcf22a656a31514d1)
 FetchContent_MakeAvailable(freetype)
+# FindFreetype treats FREETYPE_LIBRARY as a filename, not a CMake target. Give
+# RmlUi the actual build target so its imported dependency cannot become the
+# literal linker argument "freetype".
+if(NOT TARGET Freetype::Freetype)
+    add_library(Freetype::Freetype ALIAS freetype)
+endif()
 # RmlUi's font engine finds the already cross-compiled FreeType target.
 set(FREETYPE_LIBRARY freetype CACHE STRING "" FORCE)
 set(FREETYPE_LIBRARIES freetype CACHE STRING "" FORCE)

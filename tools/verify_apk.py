@@ -51,6 +51,10 @@ def verify(path, sdk, foundation=False):
                 symbols=subprocess.check_output(['readelf','--dyn-syms','--wide',lib],text=True)
                 for function in ('SDL_main','Java_com_narmanb_bm64_MainActivity_nativeInit','Java_com_narmanb_bm64_MainActivity_nativeDocumentResult','Java_com_narmanb_bm64_MainActivity_nativeSetForeground','Java_com_narmanb_bm64_MainActivity_nativeControllerSensitivity'):
                     assert function in symbols,'missing game entry '+function
+                # The SDL game process loads BM64, while the launcher preview loads
+                # BM64Platform. Both libraries must implement the touch JNI contract.
+                for function in ('nativeSetState','nativeClearState','nativePollPreview','nativeIsMenuOpen','nativeRequestMenuToggle'):
+                    assert 'Java_com_narmanb_bm64_touch_NativeTouch_'+function in symbols,'missing game touch JNI '+function
     print('APK checks passed; this does not verify device behavior or gameplay')
 
 if __name__=='__main__':
