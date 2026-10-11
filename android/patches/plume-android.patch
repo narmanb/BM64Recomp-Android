@@ -1,0 +1,521 @@
+diff --git a/plume_d3d12.cpp b/plume_d3d12.cpp
+index 8c239f4..02e9227 100644
+--- a/plume_d3d12.cpp
++++ b/plume_d3d12.cpp
+@@ -3861,6 +3861,7 @@ namespace plume {
+         capabilities.queryPools = true;
+         capabilities.maxTextureSize = 16384;
+         capabilities.preferHDR = description.dedicatedVideoMemory > (512 * 1024 * 1024);
++        capabilities.dualSrcBlend = true;
+         capabilities.samplerMirrorClampToEdge = true;
+ 
+         // Create descriptor heaps allocator.
+diff --git a/plume_metal.cpp b/plume_metal.cpp
+index a5f30a3..12d5083 100644
+--- a/plume_metal.cpp
++++ b/plume_metal.cpp
+@@ -3817,6 +3817,7 @@ namespace plume {
+         capabilities.scalarBlockLayout = true;
+         capabilities.presentWait = true;
+         capabilities.preferHDR = mtl->recommendedMaxWorkingSetSize() > (512 * 1024 * 1024);
++        capabilities.dualSrcBlend = true;
+         capabilities.dynamicDepthBias = true;
+         capabilities.uma = mtl->hasUnifiedMemory();
+         capabilities.gpuUploadHeap = capabilities.uma;
+diff --git a/plume_render_interface.h b/plume_render_interface.h
+index 2048557..dbecd97 100644
+--- a/plume_render_interface.h
++++ b/plume_render_interface.h
+@@ -99,6 +99,10 @@ namespace plume {
+         virtual uint32_t getTextureCount() const = 0;
+         virtual bool acquireTexture(RenderCommandSemaphore *signalSemaphore, uint32_t *textureIndex) = 0;
+         virtual RenderWindow getWindow() const = 0;
++        // Hand the swap chain a new native window handle after the platform
++        // destroyed/recreated its surface (Android background/resume). Default
++        // is a no-op for platforms whose window handle never changes.
++        virtual void setRenderWindow(RenderWindow window) { }
+         virtual bool isEmpty() const = 0;
+ 
+         // Only valid if displayTiming is enabled in capabilities.
+diff --git a/plume_render_interface_types.h b/plume_render_interface_types.h
+index 9dcfedf..c5183d3 100644
+--- a/plume_render_interface_types.h
++++ b/plume_render_interface_types.h
+@@ -1800,6 +1800,10 @@ namespace plume {
+         bool triangleFan = false;
+         bool dynamicDepthBias = false;
+ 
++        // Blending. Mali (ARM) GPUs do not expose dual source blending, so anything
++        // that relies on a secondary blend output needs a single source fallback.
++        bool dualSrcBlend = false;
++
+         // UMA.
+         bool uma = false;
+ 
+diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
+index 2800022..caadf00 100644
+--- a/plume_vulkan.cpp
++++ b/plume_vulkan.cpp
+@@ -9,6 +9,7 @@
+ #define VOLK_IMPLEMENTATION 
+ 
+ #include "plume_vulkan.h"
++#include "plume_android_surface.h"
+ 
+ #include <algorithm>
+ #include <cmath>
+@@ -1390,9 +1391,20 @@ namespace plume {
+         pipelineInfo.layout = pipelineLayout->vk;
+         pipelineInfo.stage = stageInfo;
+ 
++        // Creation order index of this compute pipeline. Some drivers reject a
++        // shader only at pipeline-link time (e.g. the Adreno 6xx compute-linker
++        // bugs), so on failure we log the index and enough context to identify the
++        // offending shader; vk stays VK_NULL_HANDLE and setPipeline() refuses to
++        // bind it rather than letting the driver segfault. This is the diagnostic
++        // that makes the next weird-GPU port debuggable, so it stays in.
++        static int s_computePipelineIndex = 0;
++        const int pipelineIndex = s_computePipelineIndex++;
+         VkResult res = vkCreateComputePipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+-            fprintf(stderr, "vkCreateComputePipelines failed with error code 0x%X.\n", res);
++            fprintf(stderr, "vkCreateComputePipelines FAILED: compute pipeline index=%d VkResult=0x%X entry='%s' localSize=(%u,%u,%u). "
++                "The driver rejected this shader; it will not be bound. See plume_vulkan.cpp.\n",
++                pipelineIndex, res, computeShader->entryPointName.c_str(), desc.threadGroupSizeX, desc.threadGroupSizeY, desc.threadGroupSizeZ);
++            vk = VK_NULL_HANDLE;
+             return;
+         }
+     }
+@@ -1931,7 +1943,17 @@ namespace plume {
+ 
+         VkResult res = vkAllocateDescriptorSets(device->vk, &allocateInfo, &vk);
+         if (res != VK_SUCCESS) {
+-            fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
++            // Loud fail: on some drivers (e.g. Adreno's frozen blob) a VARIABLE_DESCRIPTOR_COUNT pool
++            // is sized by the binding's DECLARED count, not the requested variable count, so an
++            // undersized boundless pool returns VK_ERROR_OUT_OF_POOL_MEMORY. Log the shape so the
++            // next person porting to a weird GPU can see which set/type failed. vk stays null; the
++            // guards in setDescriptor / setDescriptorSet then refuse to touch the driver with it.
++            fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X (rangeCount=%u boundless=%d boundlessRangeSize=%u poolTypes=%zu).\n",
++                res, desc.descriptorRangesCount, (int)desc.lastRangeIsBoundless, boundlessRangeSize, typeCounts.size());
++            for (auto &tc : typeCounts) {
++                fprintf(stderr, "  descriptorType=%d count=%u\n", (int)tc.first, tc.second);
++            }
++            vk = VK_NULL_HANDLE;
+             return;
+         }
+     }
+@@ -2019,6 +2041,13 @@ namespace plume {
+     }
+ 
+     void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
++        // If descriptor-set allocation failed at construction (e.g. VK_ERROR_OUT_OF_POOL_MEMORY on
++        // Adreno for UPDATE_AFTER_BIND pools), vk stays VK_NULL_HANDLE. Passing a null dstSet to
++        // vkUpdateDescriptorSets segfaults inside the Adreno driver, so refuse the write.
++        if (vk == VK_NULL_HANDLE) {
++            return;
++        }
++
+         assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
+ 
+         const uint32_t indexBase = setLayout->descriptorIndexBases[descriptorIndex];
+@@ -2080,6 +2109,21 @@ namespace plume {
+         this->commandQueue = commandQueue;
+         this->desc = desc;
+ 
++#   if defined(__ANDROID__)
++        // OWNERSHIP INVARIANT (Android resume-window lifetime): every non-null
++        // ANativeWindow held in one of our slots -- desc.renderWindow here,
++        // pendingRenderWindow, and the host's g_pending_resume_window -- carries
++        // exactly one ref that WE own. The window passed in desc is SDL's,
++        // unacquired, so take our own ref now; recreateSurface() releases it when
++        // it adopts a resume window, and the destructor releases whatever remains.
++        // This makes the construction window owned uniformly (no first-window
++        // special case) so recreateSurface can always release the window it
++        // replaces. See the block comment on recreateSurface().
++        if (this->desc.renderWindow != nullptr) {
++            ANativeWindow_acquire(this->desc.renderWindow);
++        }
++#   endif
++
+         VkResult res;
+ 
+ #   ifdef _WIN64
+@@ -2204,6 +2248,13 @@ namespace plume {
+             }
+         }
+ 
++#if defined(__ANDROID__)
++        fprintf(stderr, "[plume] requested swapchain format=%d; %u surface formats offered:\n", (int)requestedFormat, surfaceFormatCount);
++        for (uint32_t i = 0; i < surfaceFormatCount; i++) {
++            fprintf(stderr, "[plume]   format=%d colorSpace=%d\n", (int)surfaceFormats[i].format, (int)surfaceFormats[i].colorSpace);
++        }
++#endif
++
+         if (compatibleSurfaceFormats.empty()) {
+             fprintf(stderr, "No compatible surface formats were found.\n");
+             return;
+@@ -2249,6 +2300,19 @@ namespace plume {
+             vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
+         }
+ 
++#   if defined(__ANDROID__)
++        // Release the refs we own on the adopted window and any resume window
++        // that was published but never consumed (see the ownership invariant in
++        // the constructor).
++        if (desc.renderWindow != nullptr) {
++            ANativeWindow_release(desc.renderWindow);
++            desc.renderWindow = nullptr;
++        }
++        if (RenderWindow pending = pendingRenderWindow.exchange(nullptr)) {
++            ANativeWindow_release(pending);
++        }
++#   endif
++
+         // Remove tracking from the parent command queue.
+         commandQueue->swapChains.erase(this);
+     }
+@@ -2310,6 +2374,17 @@ namespace plume {
+     }
+ 
+     bool VulkanSwapChain::resize() {
++#   if defined(__ANDROID__)
++        // If the Android surface was destroyed and a new native window handed
++        // to us on resume, rebuild the VkSurfaceKHR before touching the swap
++        // chain. This runs on the present thread, the swap chain's owner.
++        if (androidSurfaceNeedsRetry(pendingRenderWindow.load(), surface)) {
++            if (!recreateSurface()) {
++                return false;
++            }
++        }
++#   endif
++
+         getWindowSize(width, height);
+ 
+         // Don't recreate the swap chain at all if the window doesn't have a valid size.
+@@ -2395,6 +2470,10 @@ namespace plume {
+     }
+ 
+     bool VulkanSwapChain::needsResize() const {
++#   if defined(__ANDROID__)
++        // Surface replacement is required even when the new window has the same size.
++        if (androidSurfaceNeedsRetry(pendingRenderWindow.load(), surface)) return true;
++#   endif
+         uint32_t windowWidth, windowHeight;
+         getWindowSize(windowWidth, windowHeight);
+         return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
+@@ -2436,6 +2515,105 @@ namespace plume {
+         return desc.renderWindow;
+     }
+ 
++    void VulkanSwapChain::setRenderWindow(RenderWindow window) {
++#   if defined(__ANDROID__)
++        // `window` arrives with a ref the host already owns on our behalf (the
++        // host acquired it at publish); storing it transfers that ref into the
++        // pendingRenderWindow slot. If a prior resume window is still queued here
++        // (the present thread hasn't consumed it yet), release our ref on it --
++        // it is being superseded and will never be adopted. Stashed for the
++        // present thread to consume in resize(); do not touch Vulkan objects here
++        // (this is called from the gfx thread).
++        // Always release the displaced ref, even if prev == window: prev and
++        // window each carried their own owned ref, and only one slot remains.
++        // The just-stored ref keeps the window alive.
++        if (RenderWindow prev = pendingRenderWindow.exchange(window)) {
++            ANativeWindow_release(prev);
++        }
++#   else
++        (void)window;
++#   endif
++    }
++
++#   if defined(__ANDROID__)
++    // Rebuild the VkSurfaceKHR from a fresh ANativeWindow after Android destroyed
++    // and recreated the app surface across a background/resume. Runs on the present
++    // thread (the swap chain's owner) from resize().
++    //
++    // KNOWN BOUNDED WINDOW (intentionally not fully closed):
++    // Between SDL's onNativeSurfaceDestroyed returning to Android and the present
++    // thread parking (it stops getting work once the VI thread pauses on
++    // WILLENTERBACKGROUND), a present already in flight can still touch the old
++    // surface. Four facts make this safe-and-bounded rather than a defect:
++    //   1. Memory safety is SOURCE-VERIFIED, not merely spec-implied. On Android,
++    //      vkCreateAndroidSurfaceKHR lives in the platform libvulkan WSI
++    //      (AOSP frameworks/native/vulkan/libvulkan/swapchain.cpp), NOT the Adreno
++    //      vendor blob. The Surface struct holds the window as sp<ANativeWindow>,
++    //      taking a refcount at surface creation and dropping it at
++    //      vkDestroySurfaceKHR. SDL's own ANativeWindow_release at surfaceDestroyed
++    //      therefore cannot free the window out from under an in-flight present ->
++    //      no use-after-free, independent of the frozen driver.
++    //   2. The contract-violation itself (touching the surface after
++    //      surfaceDestroyed returns) degrades gracefully PLATFORM-WIDE: an abandoned
++    //      Android BufferQueue returns errors (NO_INIT / OUT_OF_DATE) from dequeue
++    //      rather than faulting -- not an Adreno-specific mercy.
++    //   3. The window is bounded by work starvation: the VI-thread pause stops
++    //      ScreenUpdateActions, so the present thread drains at most ~1-2 residual
++    //      frames then blocks on its cursor condition.
++    //   4. The rigorous fix (block surfaceDestroyed on a present-in-flight handshake)
++    //      is IMPOSSIBLE without forking SDL: surfaceDestroyed is handled entirely
++    //      inside SDL's Java+native shim; we never run synchronously at that callsite
++    //      (we only see the async SDL_APP_WILLENTERBACKGROUND later on our event
++    //      pump). SDL itself uses a bounded-spin (backup_done, 50x10ms) at that same
++    //      callsite for its EGL path -- the very idiom we'd be replicating.
++    bool VulkanSwapChain::recreateSurface() {
++        RenderWindow newWindow = adoptAndroidWindow(desc.renderWindow,
++            pendingRenderWindow.exchange(nullptr), ANativeWindow_release);
++        if (newWindow == nullptr) return false;
++
++        VulkanInterface *renderInterface = commandQueue->device->renderInterface;
++
++        // The current window keeps its owned reference even if surface creation
++        // fails. A retry with no new resume event reuses it without releasing it.
++
++        // Tear down everything that referenced the old (destroyed) surface.
++        releaseImageViews();
++        releaseSwapChain();
++        if (surface != VK_NULL_HANDLE) {
++            vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
++            surface = VK_NULL_HANDLE;
++        }
++
++        // The old swap chain handle is meaningless once the surface is gone.
++        createInfo.oldSwapchain = VK_NULL_HANDLE;
++
++        VkAndroidSurfaceCreateInfoKHR surfaceCreateInfo = {};
++        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
++        surfaceCreateInfo.window = newWindow;
++        VkResult res = vkCreateAndroidSurfaceKHR(renderInterface->instance, &surfaceCreateInfo, nullptr, &surface);
++        if (res != VK_SUCCESS) {
++            // desc.renderWindow already points at newWindow (a window we own a ref
++            // on), so this failure path is deref-safe; needsResize() keeps
++            // returning true so resize() retries with the retained owned window.
++            fprintf(stderr, "recreateSurface: vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
++            surface = VK_NULL_HANDLE;
++            return false;
++        }
++
++        VkBool32 presentSupported = false;
++        vkGetPhysicalDeviceSurfaceSupportKHR(commandQueue->device->physicalDevice, commandQueue->familyIndex, surface, &presentSupported);
++        if (!presentSupported) {
++            fprintf(stderr, "recreateSurface: recreated surface does not support present.\n");
++            vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
++            surface = VK_NULL_HANDLE;
++            return false;
++        }
++
++        fprintf(stderr, "[plume] surface recreated from new ANativeWindow %p\n", (void *)newWindow);
++        return true;
++    }
++#   endif
++
+     bool VulkanSwapChain::isEmpty() const {
+         return (vk == VK_NULL_HANDLE) || (width == 0) || (height == 0);
+     }
+@@ -2940,6 +3118,16 @@ namespace plume {
+         switch (interfacePipeline->type) {
+         case VulkanPipeline::Type::Compute: {
+             const VulkanComputePipeline *computePipeline = static_cast<const VulkanComputePipeline *>(interfacePipeline);
++            // A compute pipeline whose vkCreateComputePipelines call failed (see
++            // VulkanComputePipeline's ctor) leaves vk == VK_NULL_HANDLE. Binding a
++            // null pipeline dereferences a null handle inside the driver and
++            // segfaults. Refuse the bind and log instead of crashing, so a driver
++            // that rejects a shader (e.g. the Adreno 6xx compute-linker bugs) fails
++            // loudly at the bind rather than mysteriously in the driver.
++            if (computePipeline->vk == VK_NULL_HANDLE) {
++                fprintf(stderr, "setPipeline: refusing to bind a compute pipeline that failed to create (vk == VK_NULL_HANDLE).\n");
++                return;
++            }
+             vkCmdBindPipeline(vk, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline->vk);
+             break;
+         }
+@@ -3488,6 +3676,12 @@ namespace plume {
+         assert(setIndex < pipelineLayout->descriptorSetLayouts.size());
+ 
+         const VulkanDescriptorSet *interfaceSet = static_cast<const VulkanDescriptorSet *>(descriptorSet);
++        if (interfaceSet->vk == VK_NULL_HANDLE) {
++            // A descriptor set whose allocation failed (null handle) must never be bound: the Adreno
++            // driver dereferences the handle and segfaults. Skip the bind rather than crash.
++            fprintf(stderr, "[plume] refusing to bind null descriptor set (setIndex=%u)\n", setIndex);
++            return;
++        }
+         vkCmdBindDescriptorSets(vk, bindPoint, pipelineLayout->vk, setIndex, 1, &interfaceSet->vk, 0, nullptr);
+     }
+ 
+@@ -3785,6 +3979,19 @@ namespace plume {
+             return;
+         }
+ 
++        // Identify the device that was actually chosen. Bug reports that include
++        // this line are usually diagnosable on sight.
++        {
++            VkPhysicalDeviceProperties chosenProperties;
++            vkGetPhysicalDeviceProperties(physicalDevice, &chosenProperties);
++            fprintf(stderr, "[plume] Using device \"%s\" (vendor 0x%04X, device API %u.%u.%u, driver 0x%08X).\n",
++                chosenProperties.deviceName, chosenProperties.vendorID,
++                VK_API_VERSION_MAJOR(chosenProperties.apiVersion),
++                VK_API_VERSION_MINOR(chosenProperties.apiVersion),
++                VK_API_VERSION_PATCH(chosenProperties.apiVersion),
++                chosenProperties.driverVersion);
++        }
++
+         // Check for extensions.
+         uint32_t extensionCount;
+         vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
+@@ -3895,6 +4102,16 @@ namespace plume {
+         deviceFeatures.pNext = featuresChain;
+         vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures);
+ 
++#if defined(__ANDROID__)
++        fprintf(stderr, "[plume] storageImageReadWithoutFormat=%d writeWithoutFormat=%d shaderInt64=%d fragmentStoresAndAtomics=%d vertexPipelineStoresAndAtomics=%d dualSrcBlend=%d\n",
++            (int)deviceFeatures.features.shaderStorageImageReadWithoutFormat,
++            (int)deviceFeatures.features.shaderStorageImageWriteWithoutFormat,
++            (int)deviceFeatures.features.shaderInt64,
++            (int)deviceFeatures.features.fragmentStoresAndAtomics,
++            (int)deviceFeatures.features.vertexPipelineStoresAndAtomics,
++            (int)deviceFeatures.features.dualSrcBlend);
++#endif
++
+         // Check for properties.
+         if (rayTracingFound) {
+             rtPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+@@ -3932,6 +4149,20 @@ namespace plume {
+             createDeviceChain = &indexingFeatures;
+         }
+ 
++#if defined(__ANDROID__)
++        // Logged here rather than with the other feature bits above because this is the exact
++        // expression that becomes capabilities.descriptorIndexing, so the two cannot drift.
++        // The sub-features are printed individually to distinguish "extension absent" (all zero)
++        // from "extension present but one sub-feature missing".
++        fprintf(stderr, "[plume] descriptorIndexingExt=%d partiallyBound=%d variableDescriptorCount=%d runtimeDescriptorArray=%d sampledImageArrayNonUniformIndexing=%d descriptorIndexing=%d\n",
++            (int)descriptorIndexingFound,
++            (int)indexingFeatures.descriptorBindingPartiallyBound,
++            (int)indexingFeatures.descriptorBindingVariableDescriptorCount,
++            (int)indexingFeatures.runtimeDescriptorArray,
++            (int)indexingFeatures.shaderSampledImageArrayNonUniformIndexing,
++            (int)descriptorIndexingSupported);
++#endif
++
+         const bool scalarBlockLayoutSupported = layoutFeatures.scalarBlockLayout;
+         if (scalarBlockLayoutSupported) {
+             layoutFeatures.pNext = createDeviceChain;
+@@ -4128,6 +4359,7 @@ namespace plume {
+         capabilities.displayTiming = supportedOptionalExtensions.find(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) != supportedOptionalExtensions.end();
+         capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
+         capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
++        capabilities.dualSrcBlend = deviceFeatures.features.dualSrcBlend;
+         capabilities.dynamicDepthBias = true;
+         capabilities.queryPools = true;
+         capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
+@@ -4453,17 +4685,47 @@ namespace plume {
+ 
+     // VulkanInterface
+ 
++#if defined(PLUME_CUSTOM_VULKAN_LOADER)
++    // Set by the host before the interface is constructed when it has loaded a
++    // Vulkan implementation itself rather than letting volk dlopen the system
++    // one. Null means "behave exactly as an unmodified build", which is why the
++    // whole mechanism is behind a define: nothing changes unless someone opts in.
++    static PFN_vkGetInstanceProcAddr customVulkanLoader = nullptr;
++
++    void SetCustomVulkanLoader(PFN_vkGetInstanceProcAddr getInstanceProcAddr) {
++        customVulkanLoader = getInstanceProcAddr;
++    }
++#endif
++
+ #if PLUME_SDL_VULKAN_ENABLED
+     VulkanInterface::VulkanInterface(RenderWindow sdlWindow) {
+ #else
+     VulkanInterface::VulkanInterface() {
+ #endif
++#   if defined(PLUME_CUSTOM_VULKAN_LOADER)
++        VkResult res = (customVulkanLoader != nullptr)
++            ? (volkInitializeCustom(customVulkanLoader), VK_SUCCESS)
++            : volkInitialize();
++#   else
+         VkResult res = volkInitialize();
++#   endif
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
+             return;
+         }
+ 
++        // vkEnumerateInstanceVersion is a 1.1 entry point; a null pointer means a
++        // 1.0 loader. Reported up front because it is the single fact that
++        // explains most "it just closes on launch" reports.
++        uint32_t loaderApiVersion = VK_API_VERSION_1_0;
++        if (vkEnumerateInstanceVersion != nullptr) {
++            vkEnumerateInstanceVersion(&loaderApiVersion);
++        }
++
++        fprintf(stderr, "[plume] Vulkan loader supports %u.%u.%u, requesting %u.%u.\n",
++            VK_API_VERSION_MAJOR(loaderApiVersion), VK_API_VERSION_MINOR(loaderApiVersion), VK_API_VERSION_PATCH(loaderApiVersion),
++            VK_API_VERSION_MAJOR(VK_API_VERSION_1_2), VK_API_VERSION_MINOR(VK_API_VERSION_1_2));
++
+         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+         appInfo.pApplicationName = "plume";
+         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+diff --git a/plume_vulkan.h b/plume_vulkan.h
+index 0a1edbe..050c47a 100644
+--- a/plume_vulkan.h
++++ b/plume_vulkan.h
+@@ -256,11 +256,21 @@ namespace plume {
+         uint32_t getTextureCount() const override;
+         bool acquireTexture(RenderCommandSemaphore *signalSemaphore, uint32_t *textureIndex) override;
+         RenderWindow getWindow() const override;
++        void setRenderWindow(RenderWindow window) override;
+         bool isEmpty() const override;
+         uint32_t getRefreshRate() const override;
+         void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
+         void releaseSwapChain();
+         void releaseImageViews();
++#if defined(__ANDROID__)
++        // Rebuild the VkSurfaceKHR from a new ANativeWindow after the Android
++        // surface was destroyed/recreated on background/resume. Runs on the
++        // present thread (the swap chain's owner) from resize(). Returns false
++        // if the new window isn't ready yet.
++        bool recreateSurface();
++        // Set by setRenderWindow() from another thread; consumed by resize().
++        std::atomic<RenderWindow> pendingRenderWindow{nullptr};
++#endif
+     };
+ 
+     struct VulkanFramebuffer : RenderFramebuffer {
+@@ -448,6 +458,14 @@ namespace plume {
+         bool endCapture() override;
+     };
+ 
++#if defined(PLUME_CUSTOM_VULKAN_LOADER)
++    // Installs a vkGetInstanceProcAddr obtained from somewhere other than volk's
++    // own dlopen of the system Vulkan loader. Must be called before constructing
++    // VulkanInterface; passing null (the default) leaves initialisation exactly
++    // as it is in a build without this define.
++    void SetCustomVulkanLoader(PFN_vkGetInstanceProcAddr getInstanceProcAddr);
++#endif
++
+     struct VulkanInterface : RenderInterface {
+         VkInstance instance = VK_NULL_HANDLE;
+         VkApplicationInfo appInfo = {};
+diff --git a/plume_android_surface.h b/plume_android_surface.h
+new file mode 100644
+index 0000000..44a2a49
+--- /dev/null
++++ b/plume_android_surface.h
+@@ -0,0 +1,18 @@
++// Copyright (c) 2026 contributors. Licensed under the MIT license.
++#pragma once
++namespace plume {
++template<class Window, class Surface>
++bool androidSurfaceNeedsRetry(Window pending, Surface surface) {
++    return pending != nullptr || surface == Surface{};
++}
++// Replacement owns a reference transferred from the pending slot. With no new
++// window, retain the current reference for repeated surface-creation attempts.
++template<class Window, class Release>
++Window adoptAndroidWindow(Window& current, Window replacement, Release release) {
++    if (replacement != nullptr) {
++        if (current != nullptr) release(current);
++        current=replacement;
++    }
++    return current;
++}
++}

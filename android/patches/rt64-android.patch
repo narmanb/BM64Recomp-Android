@@ -1,0 +1,856 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2fb01e5..bc107cf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -55,7 +55,11 @@ elseif (APPLE)
+         set (SPIRVCROSS "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/spirv-cross/lib/arm64:$ENV{DYLD_LIBRARY_PATH}" "${PROJECT_SOURCE_DIR}/src/contrib/spirv-cross/bin/arm64/spirv-cross")
+     endif()
+ else()
+-    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
++    # DXC is a build-time host tool that compiles HLSL to SPIR-V, so it must
++    # match the HOST architecture, not the target. When cross-compiling (e.g.
++    # for Android), CMAKE_SYSTEM_PROCESSOR is the target arch (aarch64), so key
++    # the selection off CMAKE_HOST_SYSTEM_PROCESSOR instead.
++    if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64")
+         set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc-linux")
+     else()
+         set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/arm64/dxc-linux")
+@@ -66,9 +70,36 @@ set(ZSTD_LEGACY_SUPPORT OFF)
+ set(ZSTD_BUILD_STATIC ON)
+ set(ZSTD_BUILD_SHARED OFF)
+ 
+-add_subdirectory(src/tools/file_to_c)
++# file_to_c is a build-time host tool (embeds shader blobs into C arrays). When
++# cross-compiling for Android, building it with the NDK would produce an arm64
++# binary that cannot run on the build host, so instead use a prebuilt host
++# binary supplied via -DRT64_FILE_TO_C=/path/to/file_to_c.
++if (ANDROID)
++    if (NOT RT64_FILE_TO_C)
++        message(FATAL_ERROR "Cross-compiling for Android requires -DRT64_FILE_TO_C pointing at a host-built file_to_c binary.")
++    endif()
++    set(FILE_TO_C "${RT64_FILE_TO_C}")
++    set(FILE_TO_C_DEP "${RT64_FILE_TO_C}")
++else()
++    add_subdirectory(src/tools/file_to_c)
++    set(FILE_TO_C file_to_c)
++    set(FILE_TO_C_DEP file_to_c)
++endif()
+ add_subdirectory(src/contrib/re-spirv)
+-add_subdirectory(src/contrib/nativefiledialog-extended)
++# nativefiledialog-extended is a desktop-only native file browser (GTK/Win32/Cocoa).
++# On Android, ROM selection is handled by the Java SAF launcher, so it is excluded.
++if (NOT ANDROID)
++    add_subdirectory(src/contrib/nativefiledialog-extended)
++endif()
++# zstd's dictBuilder uses qsort_r, which Android Bionic does not expose until
++# API 36. RT64 only needs zstd for runtime decompression (texture packs), so the
++# dictionary builder is disabled on Android. The zstd CLI (programs/) links
++# against the dictbuilder symbols and is a host-only tool we never ship, so it
++# is disabled too, otherwise a full `--build` fails at link time.
++if (ANDROID)
++    set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
++    set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
++endif()
+ add_subdirectory(src/contrib/zstd/build/cmake)
+ 
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND RT64_SDL_WINDOW_VULKAN)
+@@ -96,8 +127,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+     endif()
+ endif()
+ 
+-set(ANDROID_PLATFORM android-24)
+-set(ANDROID_ABI arm64-v8a)
++
+ 
+ # For DXC
+ set (DXC_COMMON_OPTS "-I${PROJECT_SOURCE_DIR}/src")
+@@ -110,13 +140,52 @@ set (DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T cs_6_3")
+ set (DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T gs_6_3")
+ set (DXC_RT_OPTS "${DXC_COMMON_OPTS}" "-D" "RT_SHADER" "-T" "lib_6_3" "-fspv-target-env=vulkan1.1spirv1.4" "-fspv-extension=SPV_KHR_ray_tracing" "-fspv-extension=SPV_EXT_descriptor_indexing")
+ 
++# Adreno 6xx compatibility: the Qualcomm Vulkan compiler (driver 0746, frozen
++# 2023) fails to link a compute shader that still contains a non-inlined
++# OpFunctionCall ("Failed to link shaders" / VK_ERROR_UNKNOWN from
++# vkCreateComputePipelines), even though the SPIR-V is valid and links on desktop
++# drivers. The framebuffer compute shaders are compiled at -O0 (a load-bearing
++# workaround for a separate DXC codegen bug in EndianSwapUINT*), which leaves real
++# helper calls un-inlined. We therefore run a uniform spirv-opt inline pass over
++# every compute shader after DXC and validate the result in the same rule, so a
++# bad pass interaction can never ship silently. The pass is a no-op on shaders DXC
++# already fully inlined, costs milliseconds, and regression-proofs any helper
++# function added to a compute shader later. Only wired on Android (the affected
++# target); desktop keeps DXC output verbatim.
++if (ANDROID)
++    file(GLOB RT64_SHADER_TOOLS_DIRS "${ANDROID_NDK}/shader-tools/*")
++    find_program(SPIRV_OPT NAMES spirv-opt HINTS ${RT64_SHADER_TOOLS_DIRS} REQUIRED)
++    find_program(SPIRV_VAL NAMES spirv-val HINTS ${RT64_SHADER_TOOLS_DIRS} REQUIRED)
++    message(STATUS "RT64 Adreno compute-shader inline pass: ${SPIRV_OPT}")
++    # --skip-block-layout applies to spirv-opt's built-in input-validation pass;
++    # see the spirv-val note in build_shader_spirv_impl for why the DX layout is
++    # relaxed. spirv-opt otherwise rejects the -fvk-use-dx-layout StructuredBuffers.
++    set(RT64_SPIRV_INLINE_PASSES --skip-block-layout --eliminate-dead-branches --merge-return --inline-entry-points-exhaustive --eliminate-dead-functions)
++endif()
++
+ function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+     add_custom_command(OUTPUT ${OUTNAME}.spv
+         COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
+         DEPENDS ${FILENAME})
++    # RT64_SPIRV_POST_OPT is set by build_compute_shader (CMake dynamic scoping
++    # makes it visible here). See the Adreno 6xx note above.
++    if (ANDROID AND RT64_SPIRV_POST_OPT)
++        # --skip-block-layout: these shaders are compiled with -fvk-use-dx-layout
++        # (DX-style struct packing), which intentionally diverges from Vulkan's
++        # standard block-layout rules; RT64 declares matching descriptor layouts and
++        # they run correctly on-device. spirv-val here is a guard that the inline
++        # pass did not corrupt the module, not a re-check of the layout contract.
++        add_custom_command(OUTPUT ${OUTNAME}.opt.spv
++            COMMAND ${SPIRV_OPT} ${RT64_SPIRV_INLINE_PASSES} ${OUTNAME}.spv -o ${OUTNAME}.opt.spv
++            COMMAND ${SPIRV_VAL} --target-env vulkan1.0 --skip-block-layout ${OUTNAME}.opt.spv
++            DEPENDS ${OUTNAME}.spv)
++        set(RT64_SPIRV_BLOB ${OUTNAME}.opt.spv)
++    else()
++        set(RT64_SPIRV_BLOB ${OUTNAME}.spv)
++    endif()
+     add_custom_command(OUTPUT ${OUTNAME}.spirv.c
+-        COMMAND file_to_c ${OUTNAME}.spv ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
+-        DEPENDS ${OUTNAME}.spv file_to_c
++        COMMAND ${FILE_TO_C} ${RT64_SPIRV_BLOB} ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
++        DEPENDS ${RT64_SPIRV_BLOB} ${FILE_TO_C_DEP}
+         BYPRODUCTS ${OUTNAME}.spirv.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.spirv.c)
+ endfunction()
+@@ -126,8 +195,8 @@ function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+         COMMAND ${DXC} ${DXC_DXIL_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.dxil
+         DEPENDS ${FILENAME})
+     add_custom_command(OUTPUT ${OUTNAME}.dxil.c
+-        COMMAND file_to_c ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
+-        DEPENDS ${OUTNAME}.dxil file_to_c
++        COMMAND ${FILE_TO_C} ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
++        DEPENDS ${OUTNAME}.dxil ${FILE_TO_C_DEP}
+         BYPRODUCTS ${OUTNAME}.dxil.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.dxil.c)
+ endfunction()
+@@ -146,8 +215,8 @@ function(build_shader_msl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+             COMMAND xcrun -sdk macosx metallib ${OUTNAME}.ir -o ${OUTNAME}.metallib
+             DEPENDS ${OUTNAME}.ir)
+     add_custom_command(OUTPUT ${OUTNAME}.metal.c
+-            COMMAND file_to_c ${OUTNAME}.metallib ${TARGET_NAME}BlobMSL ${OUTNAME}.metal.c ${OUTNAME}.metal.h
+-            DEPENDS ${OUTNAME}.metallib file_to_c
++            COMMAND ${FILE_TO_C} ${OUTNAME}.metallib ${TARGET_NAME}BlobMSL ${OUTNAME}.metal.c ${OUTNAME}.metal.h
++            DEPENDS ${OUTNAME}.metallib ${FILE_TO_C_DEP}
+             BYPRODUCTS ${OUTNAME}.metal.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.metal.c)
+ endfunction()
+@@ -240,8 +309,8 @@ function(preprocess_shader TARGETOBJ SHADERNAME)
+     cmake_path(GET OUTNAME PARENT_PATH OUTPUT_DIR)
+     preprocess(${FILENAME} ${OUTNAME}.rw ${DXC_COMMON_OPTS})
+     add_custom_command(OUTPUT ${OUTNAME}.rw.c
+-        COMMAND file_to_c ${OUTNAME}.rw ${TARGET_NAME}Text ${OUTNAME}.rw.c ${OUTNAME}.rw.h
+-        DEPENDS ${OUTNAME}.rw file_to_c
++        COMMAND ${FILE_TO_C} ${OUTNAME}.rw ${TARGET_NAME}Text ${OUTNAME}.rw.c ${OUTNAME}.rw.h
++        DEPENDS ${OUTNAME}.rw ${FILE_TO_C_DEP}
+         BYPRODUCTS ${OUTNAME}.rw.h)
+     file(MAKE_DIRECTORY ${OUTPUT_DIR})
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.rw.c)
+@@ -274,6 +343,9 @@ function(build_vertex_shader_spec_constants TARGETOBJ SHADERNAME)
+ endfunction()
+ 
+ function(build_compute_shader TARGETOBJ SHADERNAME)
++    # Enable the Adreno 6xx force-inline + validate pass for compute shaders only
++    # (see build_shader_spirv_impl). Raster/RT shaders link fine unmodified.
++    set(RT64_SPIRV_POST_OPT TRUE)
+     build_shader(${TARGETOBJ} ${SHADERNAME} "${DXC_CS_OPTS}" ${ARGN})
+ endfunction()
+ 
+@@ -286,6 +358,14 @@ if (WIN32)
+     set(SDL2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/include")
+     set(SDL2_LIBRARIES "SDL2" "SDL2main")
+     link_directories("${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64")
++elseif(ANDROID)
++    # Android has no system SDL2; fetch and build it as part of the NDK build.
++    # SDL2's Android backend supplies the ANativeWindow (via SDLActivity) and
++    # handles input/audio. Plume still creates the Vulkan surface natively from
++    # the ANativeWindow (vkCreateAndroidSurfaceKHR), so PLUME_SDL_VULKAN_ENABLED
++    # stays off here.
++    set(SDL2_INCLUDE_DIRS "$<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>")
++    set(SDL2_LIBRARIES SDL2::SDL2)
+ else()
+     find_package(SDL2 REQUIRED)
+ endif()
+@@ -305,6 +385,7 @@ endif()
+ 
+ set (SOURCES
+     "${PROJECT_SOURCE_DIR}/src/common/rt64_common.cpp"
++    "${PROJECT_SOURCE_DIR}/src/common/rt64_device_workarounds.cpp"
+     "${PROJECT_SOURCE_DIR}/src/common/rt64_dynamic_libraries.cpp"
+     "${PROJECT_SOURCE_DIR}/src/common/rt64_elapsed_timer.cpp"
+     "${PROJECT_SOURCE_DIR}/src/common/rt64_emulator_configuration.cpp"
+@@ -419,9 +500,12 @@ include_directories(
+     "${PROJECT_SOURCE_DIR}/src/contrib/imgui"
+     "${PROJECT_SOURCE_DIR}/src/contrib/hlslpp/include"
+     "${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-core/src/api"
+-    "${PROJECT_SOURCE_DIR}/src/contrib/nativefiledialog-extended/src/include"
+ )
+ 
++if (NOT ANDROID)
++    include_directories("${PROJECT_SOURCE_DIR}/src/contrib/nativefiledialog-extended/src/include")
++endif()
++
+ if (WIN32)
+     # DXC only needs to be included during runtime for Windows.
+     include_directories("${PROJECT_SOURCE_DIR}/src/contrib/dxc/inc")
+@@ -438,7 +522,9 @@ set_target_properties(rt64 PROPERTIES PREFIX "")
+ 
+ # Add common libraries.
+ target_link_libraries(rt64 re-spirv)
+-target_link_libraries(rt64 nfd)
++if (NOT ANDROID)
++    target_link_libraries(rt64 nfd)
++endif()
+ target_link_libraries(rt64 libzstd_static)
+ target_link_libraries(rt64 plume)
+ 
+@@ -501,6 +587,18 @@ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING")
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING")
++
++# Single source blending fallback for Vulkan devices without the dualSrcBlend feature (all Mali
++# GPUs, some older desktop drivers). Selected at runtime from RenderDeviceCapabilities::dualSrcBlend,
++# so devices that do support dual source blending keep using the shaders above unchanged.
++# SPIR-V only: D3D12 and Metal always report dual source blending as supported.
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSDynamicNoDualSrc.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D NO_DUAL_SRC_BLEND")
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSDynamicMSNoDualSrc.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D MULTISAMPLING" "-D NO_DUAL_SRC_BLEND")
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantNoDualSrc.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D NO_DUAL_SRC_BLEND")
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantMSNoDualSrc.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING" "-D NO_DUAL_SRC_BLEND")
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantFlatNoDualSrc.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D NO_DUAL_SRC_BLEND")
++build_shader_spirv(rt64 "src/shaders/RasterPS.hlsl" "${DXC_PS_OPTS}" "src/shaders/RasterPSSpecConstantFlatMSNoDualSrc.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING" "-D NO_DUAL_SRC_BLEND")
++
+ build_vertex_shader( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSDynamic.hlsl" "-D DYNAMIC_RENDER_PARAMS")
+ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstant.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS")
+ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
+diff --git a/src/common/rt64_device_workarounds.cpp b/src/common/rt64_device_workarounds.cpp
+new file mode 100644
+index 0000000..3aa9b4e
+--- /dev/null
++++ b/src/common/rt64_device_workarounds.cpp
+@@ -0,0 +1,53 @@
++//
++// RT64
++//
++
++#include "rt64_device_workarounds.h"
++
++#include <atomic>
++#include <cstdio>
++
++namespace RT64 {
++    // Atomic because the host sets it from the thread that applies a configuration
++    // change while the render thread reads it during command recording. Relaxed
++    // ordering is enough: nothing else is published alongside it.
++    //
++    // THE RACE WORTH THINKING ABOUT, since this file also says gating one direction
++    // and not the other is the bug: a flip can land MID-FRAME, between the
++    // copyFromRAM read and the copyToNative writeback, producing a single frame in
++    // exactly that mixed configuration. It is still safe, and the reason is that the
++    // crash comes from EXECUTING a dispatch, not from omitting its partner:
++    //   - flipping to Off can only ever skip work, so a mixed frame is strictly
++    //     safer than the frame before it;
++    //   - flipping to On resumes dispatches, so a broken device crashes -- but it
++    //     was going to crash on the very next full frame anyway, which is precisely
++    //     what the user asked for by turning the workaround off.
++    // On healthy hardware a mixed frame is at worst one frame of stale framebuffer
++    // content. So no lock, and no attempt to make the pair atomic with each other.
++    static std::atomic<bool> framebufferSyncEnabled = true;
++
++    void SetFramebufferSyncEnabled(bool enabled) {
++        // Logged on every change, because a report of "effects look wrong" is
++        // otherwise indistinguishable from a real rendering bug -- this is the one
++        // line that says the user turned the workaround on. Only on change: the host
++        // re-applies the whole configuration whenever any graphics option moves.
++        // The first call always logs, so the absence of this line never has to be
++        // interpreted -- a log that only appears when the workaround is on cannot
++        // distinguish "sync enabled" from "this build predates the setting".
++        // Deliberately a plain bool, not an atomic: the setter has a single caller on
++        // a single thread (the host's configuration-apply path). If that ever stops
++        // being true the worst case is a duplicated log line, not a data race that
++        // matters -- but it would then be wrong to reason about, so make it atomic
++        // rather than widening this assumption.
++        static bool everLogged = false;
++        const bool previous = framebufferSyncEnabled.exchange(enabled, std::memory_order_relaxed);
++        if (!everLogged || (previous != enabled)) {
++            everLogged = true;
++            fprintf(stderr, "[rt64] framebuffer RAM<->native sync %s\n", enabled ? "ENABLED" : "DISABLED (driver workaround: framebuffer effects will be inaccurate)");
++        }
++    }
++
++    bool GetFramebufferSyncEnabled() {
++        return framebufferSyncEnabled.load(std::memory_order_relaxed);
++    }
++};
+diff --git a/src/common/rt64_device_workarounds.h b/src/common/rt64_device_workarounds.h
+new file mode 100644
+index 0000000..df0202d
+--- /dev/null
++++ b/src/common/rt64_device_workarounds.h
+@@ -0,0 +1,39 @@
++//
++// RT64
++//
++
++#pragma once
++
++namespace RT64 {
++    // Process-wide switches for working around driver bugs that RT64 cannot detect
++    // reliably and cannot fix. Deliberately global rather than carried in
++    // UserConfiguration: the sites that read them sit deep inside command recording
++    // (NativeTarget) with no path to the configuration, and threading one through
++    // every intermediate layer would widen the fork's diff against upstream for a
++    // value that is constant for the lifetime of a frame.
++    //
++    // Everything here defaults to the standard, correct behaviour, so a host that
++    // never calls these setters gets stock RT64.
++
++    // Framebuffer RAM<->native synchronisation, i.e. the two compute dispatches that
++    // convert between emulated RDRAM and the GPU's render targets
++    // (NativeTarget::copyFromRAM and NativeTarget::copyToNative).
++    //
++    // On some Qualcomm Adreno drivers -- confirmed on the 0x801e... branch shipped
++    // with the Adreno 630 -- vkCmdDispatch for these two shaders dereferences null
++    // inside the driver at command RECORDING time, killing the process about a
++    // second after the game starts rendering. Validation (core and synchronisation)
++    // is clean at the crash site, and the same binary does not crash under Mesa
++    // Turnip on the same device, so the fault is in the driver rather than in RT64's
++    // usage.
++    //
++    // Disabling this skips only those two dispatches. Everything around them --
++    // barriers, descriptor sets, pipeline binding, the readback copies -- still runs,
++    // which is exactly the configuration that was measured on device. The cost is
++    // that anything the game reads back from, or blits into, a framebuffer stops
++    // being synchronised, so framebuffer-dependent effects may render incorrectly or
++    // not at all. It is a last resort for hardware that cannot run the game at all
++    // otherwise, not a performance option.
++    void SetFramebufferSyncEnabled(bool enabled);
++    bool GetFramebufferSyncEnabled();
++};
+diff --git a/src/gui/rt64_file_dialog.cpp b/src/gui/rt64_file_dialog.cpp
+index 72faede..a8e1af0 100644
+--- a/src/gui/rt64_file_dialog.cpp
++++ b/src/gui/rt64_file_dialog.cpp
+@@ -6,13 +6,37 @@
+ 
+ #include <cassert>
+ 
++#if !defined(__ANDROID__)
+ #include <nfd.h>
++#endif
+ 
+ namespace RT64 {
+     // FileDialog
+ 
+     std::atomic<bool> FileDialog::isOpen = false;
+ 
++#if defined(__ANDROID__)
++    // On Android there is no native file-browser dialog. ROM/file selection is
++    // handled by the Java Storage Access Framework launcher, which hands the
++    // chosen path to the native side directly. These entry points are therefore
++    // no-ops that return an empty path.
++    void FileDialog::initialize() {}
++    void FileDialog::finish() {}
++
++    std::filesystem::path FileDialog::getDirectoryPath() {
++        return {};
++    }
++
++    std::filesystem::path FileDialog::getOpenFilename(const std::vector<FileFilter> &filters) {
++        (void)filters;
++        return {};
++    }
++
++    std::filesystem::path FileDialog::getSaveFilename(const std::vector<FileFilter> &filters) {
++        (void)filters;
++        return {};
++    }
++#else
+     void FileDialog::initialize() {
+         NFD_Init();
+     }
+@@ -76,4 +100,5 @@ namespace RT64 {
+         isOpen = false;
+         return path;
+     }
++#endif
+ };
+\ No newline at end of file
+diff --git a/src/hle/rt64_application_window.cpp b/src/hle/rt64_application_window.cpp
+index 86ae197..ac3208c 100755
+--- a/src/hle/rt64_application_window.cpp
++++ b/src/hle/rt64_application_window.cpp
+@@ -11,6 +11,8 @@
+ #if defined(_WIN32)
+ #   include <Windows.h>
+ #   include <ShellScalingAPI.h>
++#elif defined(__ANDROID__)
++#   include <android/native_window.h>
+ #elif defined(__linux__)
+ #   define Status int
+ #   if !defined(RT64_SDL_WINDOW_VULKAN)
+@@ -103,9 +105,7 @@ namespace RT64 {
+         bounds.top = rect.top;
+         bounds.width = rect.right - rect.left;
+         bounds.height = rect.bottom - rect.top;
+-#   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
+-#   elif defined(__linux__) || defined(__APPLE__)
++#   elif defined(__ANDROID__) || defined(__linux__) || defined(__APPLE__)
+         if (SDL_VideoInit(nullptr) != 0) {
+             printf("Failed to init SDL2 video: %s\n", SDL_GetError());
+             assert(false && "Failed to init SDL2 video");
+@@ -145,10 +145,12 @@ namespace RT64 {
+         SDL_GetWindowWMInfo(sdlWindow, &wmInfo);
+ #   if defined(_WIN32)
+         windowHandle = wmInfo.info.win.window;
++#   elif defined(__ANDROID__)
++        // Plume creates the Vulkan surface directly from the ANativeWindow via
++        // vkCreateAndroidSurfaceKHR, so RenderWindow is an ANativeWindow*.
++        windowHandle = wmInfo.info.android.window;
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         windowHandle = sdlWindow;
+-#   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
+ #   elif defined(__linux__)
+         windowHandle.display = wmInfo.info.x11.display;
+         windowHandle.window = wmInfo.info.x11.window;
+@@ -229,6 +231,9 @@ namespace RT64 {
+         fullScreen = newFullScreen;
+ #   elif defined(__APPLE__)
+         windowWrapper->toggleFullscreen();
++#   elif defined(__ANDROID__)
++        // Android apps are always fullscreen; nothing to toggle.
++        fullScreen = newFullScreen;
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         if (newFullScreen) {
+             SDL_SetWindowFullscreen(windowHandle, SDL_WINDOW_FULLSCREEN_DESKTOP);
+@@ -288,6 +293,18 @@ namespace RT64 {
+         }
+ 
+         refreshRate = displayMode.refresh_rate;
++#   elif defined(__ANDROID__)
++        // On Android the surface is an ANativeWindow, not an SDL_Window handle,
++        // so query the refresh rate through the SDL window kept in sdlWindow.
++        int displayIndex = (sdlWindow != nullptr) ? SDL_GetWindowDisplayIndex(sdlWindow) : 0;
++        if (displayIndex < 0) {
++            displayIndex = 0;
++        }
++
++        SDL_DisplayMode displayMode = {};
++        if (SDL_GetCurrentDisplayMode(displayIndex, &displayMode) == 0) {
++            refreshRate = displayMode.refresh_rate;
++        }
+ #   elif defined(__linux__)
+         // Sourced from: https://stackoverflow.com/a/66865623
+         XRRScreenResources *screenResources = XRRGetScreenResources(windowHandle.display, windowHandle.window);
+@@ -341,6 +358,9 @@ namespace RT64 {
+         GetWindowRect(windowHandle, &rect);
+         newWindowLeft = rect.left;
+         newWindowTop = rect.top;
++#   elif defined(__ANDROID__)
++        // The Android surface is fullscreen and never moves.
++        return false;
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         SDL_GetWindowPosition(windowHandle, &newWindowLeft, &newWindowTop);
+ #   elif defined(__linux__)
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 3227ab1..1d41696 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -501,7 +501,11 @@ namespace RT64 {
+                     }
+                 }
+ 
+-                skipPresent = skipPresent || ext.swapChain->isEmpty();
++                // When the swap chain is invalid (e.g. Android surface lost on background, where
++                // vkCreateSwapchainKHR returns VK_ERROR_SURFACE_LOST_KHR but leaves a stale non-null
++                // handle so isEmpty() reads false), skipping present avoids threadPresent recreating
++                // framebuffers from already-released image views -> vkCreateFramebuffer SIGSEGV.
++                skipPresent = skipPresent || ext.swapChain->isEmpty() || !swapChainValid;
+ 
+                 Present &present = presents[processCursor];
+                 ext.workloadQueue->waitForWorkloadId(present.workloadId);
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 9fae0d4..77c3a00 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -312,7 +312,12 @@ namespace RT64 {
+         
+         const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
+         if (createSet) {
++            #if defined(__ANDROID__)
++            // Allocate descriptor capacity once for stock Adreno instead of growing full pools.
++            descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, FramebufferRendererDescriptorTextureSet::UpperRange);
++#else
+             descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, ((textureCacheSize + 1) * 3) / 2);
++#endif
+         }
+ 
+         if (createSet || (descriptorTextureReplacementMapEnabled != textureCacheReplacementMapEnabled)) {
+diff --git a/src/render/rt64_native_target.cpp b/src/render/rt64_native_target.cpp
+index 6891b7b..0ed49cc 100644
+--- a/src/render/rt64_native_target.cpp
++++ b/src/render/rt64_native_target.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "rt64_native_target.h"
+ 
++#include "common/rt64_device_workarounds.h"
+ #include "gbi/rt64_f3d.h"
+ #include "shared/rt64_fb_common.h"
+ 
+@@ -197,7 +198,13 @@ namespace RT64 {
+         worker->commandList->setComputeDescriptorSet(readBuffer.readDescSet->get(), 0);
+         worker->commandList->setComputeDescriptorSet(emptyFbChange.readChangesSet->get(), 1);
+         worker->commandList->setComputePushConstants(0, &nativeCB);
+-        worker->commandList->dispatch(dispatchX, dispatchY, 1);
++        // RAM -> native. Gated together with the native -> RAM dispatch in
++        // copyToNative: skipping only one of the two moves the driver crash to the
++        // other rather than avoiding it (measured on an Adreno 630, not predicted).
++        // See rt64_device_workarounds.h.
++        if (GetFramebufferSyncEnabled()) {
++            worker->commandList->dispatch(dispatchX, dispatchY, 1);
++        }
+         worker->commandList->barriers(RenderBarrierStage::ALL, afterBarriers, uint32_t(std::size(afterBarriers)));
+ 
+         if (hasCurrentResource) {
+@@ -343,7 +350,12 @@ namespace RT64 {
+         worker->commandList->setComputePushConstants(0, &nativeCB);
+         worker->commandList->setComputeDescriptorSet(writeBuffer.writeDescSet->get(), 0);
+         worker->commandList->setComputeDescriptorSet(srcTarget->fbWriteDescSet->get(), 1);
+-        worker->commandList->dispatch(dispatchX, dispatchY, 1);
++        // Native -> RAM. See the matching gate in copyFromRAM: both must be gated
++        // together, and only the dispatch is skipped -- the barriers and readback
++        // copies below still run, which is the configuration that was measured.
++        if (GetFramebufferSyncEnabled()) {
++            worker->commandList->dispatch(dispatchX, dispatchY, 1);
++        }
+ 
+         RenderBufferBarrier copyBarriers[] = {
+             RenderBufferBarrier(readBuffer->nativeBuffer.get(), RenderBufferAccess::READ),
+diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
+index 721a01e..d73881a 100644
+--- a/src/render/rt64_raster_shader.cpp
++++ b/src/render/rt64_raster_shader.cpp
+@@ -13,6 +13,12 @@
+ #include "shaders/RasterPSSpecConstantMS.hlsl.spirv.h"
+ #include "shaders/RasterPSSpecConstantFlat.hlsl.spirv.h"
+ #include "shaders/RasterPSSpecConstantFlatMS.hlsl.spirv.h"
++#include "shaders/RasterPSDynamicNoDualSrc.hlsl.spirv.h"
++#include "shaders/RasterPSDynamicMSNoDualSrc.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantNoDualSrc.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantMSNoDualSrc.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantFlatNoDualSrc.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantFlatMSNoDualSrc.hlsl.spirv.h"
+ #include "shaders/RasterVSDynamic.hlsl.spirv.h"
+ #include "shaders/RasterVSSpecConstant.hlsl.spirv.h"
+ #include "shaders/RasterVSSpecConstantFlat.hlsl.spirv.h"
+@@ -74,12 +80,20 @@ namespace RT64 {
+         rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
+         rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
+         rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
++        rasterPSNoDualSrc.parse(RasterPSSpecConstantNoDualSrcBlobSPIRV, std::size(RasterPSSpecConstantNoDualSrcBlobSPIRV));
++        rasterPSMSNoDualSrc.parse(RasterPSSpecConstantMSNoDualSrcBlobSPIRV, std::size(RasterPSSpecConstantMSNoDualSrcBlobSPIRV));
++        rasterPSFlatNoDualSrc.parse(RasterPSSpecConstantFlatNoDualSrcBlobSPIRV, std::size(RasterPSSpecConstantFlatNoDualSrcBlobSPIRV));
++        rasterPSFlatMSNoDualSrc.parse(RasterPSSpecConstantFlatMSNoDualSrcBlobSPIRV, std::size(RasterPSSpecConstantFlatMSNoDualSrcBlobSPIRV));
+         assert(!rasterVS.empty());
+         assert(!rasterVSFlat.empty());
+         assert(!rasterPS.empty());
+         assert(!rasterPSMS.empty());
+         assert(!rasterPSFlat.empty());
+         assert(!rasterPSFlatMS.empty());
++        assert(!rasterPSNoDualSrc.empty());
++        assert(!rasterPSMSNoDualSrc.empty());
++        assert(!rasterPSFlatNoDualSrc.empty());
++        assert(!rasterPSFlatMSNoDualSrc.empty());
+     }
+ 
+     // RasterShader
+@@ -89,9 +103,16 @@ namespace RT64 {
+     {
+         assert(device != nullptr);
+ 
++        // Only the SPIR-V permutations ship a NO_DUAL_SRC_BLEND variant. The DXIL and MSL ones always
++        // emit the secondary output, so they are only correct on a device that supports dual source
++        // blending -- which holds because plume hardcodes the capability to true on D3D12 and Metal
++        // and only queries it on Vulkan. If that ever changes, those backends need a fallback too.
++        assert((shaderFormat == RenderShaderFormat::SPIRV || device->getCapabilities().dualSrcBlend) &&
++            "Only the SPIR-V shaders have a fallback for devices without dual source blending.");
++
+         this->device = device;
+         this->desc = desc;
+-        
++
+         const bool useMSAA = (multisampling.sampleCount > 1);
+         std::unique_ptr<RenderShader> vertexShader;
+         std::unique_ptr<RenderShader> pixelShader;
+@@ -104,12 +125,25 @@ namespace RT64 {
+             const respv::Shader *PS = nullptr;
+             VS = desc.flags.smoothShade ? &optimizerCacheSPIRV->rasterVS : &optimizerCacheSPIRV->rasterVSFlat;
+ 
+-            // Pick the correct SPIR-V based on the configuration.
++            // Pick the correct SPIR-V based on the configuration. Devices without dual source
++            // blending get the single output variant that carries the blending factor in the
++            // primary output's alpha instead.
++            const bool dualSrcBlend = device->getCapabilities().dualSrcBlend;
+             if (desc.flags.smoothShade) {
+-                PS = useMSAA ? &optimizerCacheSPIRV->rasterPSMS : &optimizerCacheSPIRV->rasterPS;
++                if (dualSrcBlend) {
++                    PS = useMSAA ? &optimizerCacheSPIRV->rasterPSMS : &optimizerCacheSPIRV->rasterPS;
++                }
++                else {
++                    PS = useMSAA ? &optimizerCacheSPIRV->rasterPSMSNoDualSrc : &optimizerCacheSPIRV->rasterPSNoDualSrc;
++                }
+             }
+             else {
+-                PS = useMSAA ? &optimizerCacheSPIRV->rasterPSFlatMS : &optimizerCacheSPIRV->rasterPSFlat;
++                if (dualSrcBlend) {
++                    PS = useMSAA ? &optimizerCacheSPIRV->rasterPSFlatMS : &optimizerCacheSPIRV->rasterPSFlat;
++                }
++                else {
++                    PS = useMSAA ? &optimizerCacheSPIRV->rasterPSFlatMSNoDualSrc : &optimizerCacheSPIRV->rasterPSFlatNoDualSrc;
++                }
+             }
+ 
+             thread_local std::vector<respv::SpecConstant> specConstants;
+@@ -330,11 +364,24 @@ namespace RT64 {
+         pipelineDesc.specConstantsCount = uint32_t(c.specConstants.size());
+ 
+         // Alpha blending is performed by using dual source blending. The blending factor will be in the secondary output.
++        //
++        // Devices that do not support dual source blending (every Mali GPU, some older desktop drivers) get a
++        // fallback instead: the NO_DUAL_SRC_BLEND shader variant writes the blending factor into the primary
++        // output's alpha and we blend against that. The tradeoff is that the coverage value the primary output
++        // would normally carry is lost wherever the factor takes its place, so coverage based effects are
++        // inaccurate there. Without this the pipeline is invalid and drivers are free to render garbage,
++        // which is what Mali does.
++        //
++        // NOTE: the shader decides whether to write the factor from whether blending is enabled here, so the
++        // two must stay in agreement. The specialized path below sets alphaBlend from the same predicate the
++        // shader uses, but RasterShaderUber hardcodes it to true -- the shader's DYNAMIC_RENDER_PARAMS branch
++        // covers that by always writing the factor. Changing either side requires changing the other.
++        const bool dualSrcBlend = c.device->getCapabilities().dualSrcBlend;
+         RenderBlendDesc &targetBlend = pipelineDesc.renderTargetBlend[0];
+         if (c.alphaBlend) {
+             targetBlend.blendEnabled = true;
+-            targetBlend.srcBlend = RenderBlend::SRC1_ALPHA;
+-            targetBlend.dstBlend = RenderBlend::INV_SRC1_ALPHA;
++            targetBlend.srcBlend = dualSrcBlend ? RenderBlend::SRC1_ALPHA : RenderBlend::SRC_ALPHA;
++            targetBlend.dstBlend = dualSrcBlend ? RenderBlend::INV_SRC1_ALPHA : RenderBlend::INV_SRC_ALPHA;
+             targetBlend.blendOp = RenderBlendOperation::ADD;
+         }
+ 
+@@ -407,6 +454,10 @@ namespace RT64 {
+     RasterShaderUber::RasterShaderUber(RenderDevice *device, RenderShaderFormat shaderFormat, const RenderMultisampling &multisampling, const ShaderLibrary *shaderLibrary, uint32_t threadCount) {
+         assert(device != nullptr);
+ 
++        // Same coupling as in RasterShader: only the SPIR-V blobs below have a NO_DUAL_SRC_BLEND variant.
++        assert((shaderFormat == RenderShaderFormat::SPIRV || device->getCapabilities().dualSrcBlend) &&
++            "Only the SPIR-V shaders have a fallback for devices without dual source blending.");
++
+         // Create the shaders.
+         const void *VSBlob = nullptr;
+         const void *PSBlob = nullptr;
+@@ -424,9 +475,15 @@ namespace RT64 {
+ #   endif
+         case RenderShaderFormat::SPIRV:
+             VSBlob = RasterVSDynamicBlobSPIRV;
+-            PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
+             VSBlobSize = uint32_t(std::size(RasterVSDynamicBlobSPIRV));
+-            PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
++            if (device->getCapabilities().dualSrcBlend) {
++                PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
++                PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
++            }
++            else {
++                PSBlob = useMSAA ? RasterPSDynamicMSNoDualSrcBlobSPIRV : RasterPSDynamicNoDualSrcBlobSPIRV;
++                PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSNoDualSrcBlobSPIRV) : std::size(RasterPSDynamicNoDualSrcBlobSPIRV));
++            }
+             break;
+ #   ifdef __APPLE__
+         case RenderShaderFormat::METAL:
+diff --git a/src/render/rt64_raster_shader.h b/src/render/rt64_raster_shader.h
+index 3b991ff..f01fe2e 100644
+--- a/src/render/rt64_raster_shader.h
++++ b/src/render/rt64_raster_shader.h
+@@ -36,6 +36,12 @@ namespace RT64 {
+         respv::Shader rasterPSFlat;
+         respv::Shader rasterPSFlatMS;
+ 
++        // Variants for devices without the dualSrcBlend feature. See RasterShader::createPipeline.
++        respv::Shader rasterPSNoDualSrc;
++        respv::Shader rasterPSMSNoDualSrc;
++        respv::Shader rasterPSFlatNoDualSrc;
++        respv::Shader rasterPSFlatMSNoDualSrc;
++
+         void initialize();
+     };
+ 
+diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
+index d1c5273..4973699 100644
+--- a/src/render/rt64_shader_library.cpp
++++ b/src/render/rt64_shader_library.cpp
+@@ -5,6 +5,7 @@
+ #include "rt64_shader_library.h"
+ 
+ #include "common/rt64_common.h"
++#include "rhi/rt64_render_hooks.h"
+ #include "shared/rt64_render_target_copy.h"
+ #include "shared/rt64_rsp_vertex_test_z.h"
+ 
+@@ -599,7 +600,7 @@ namespace RT64 {
+             RenderGraphicsPipelineDesc pipelineDesc;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = regularShader.get();
+-            pipelineDesc.renderTargetFormat[0] = RenderFormat::B8G8R8A8_UNORM; // TODO: Use whatever format the swap chain was created with.
++            pipelineDesc.renderTargetFormat[0] = GetSwapChainFormat();
+             pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
+diff --git a/src/render/rt64_texture_cache.cpp b/src/render/rt64_texture_cache.cpp
+index 0848f3e..39a140e 100644
+--- a/src/render/rt64_texture_cache.cpp
++++ b/src/render/rt64_texture_cache.cpp
+@@ -1515,7 +1515,7 @@ namespace RT64 {
+                 if (fileSystems[i]->load(ReplacementDatabaseFilename, databaseBytes)) {
+                     try {
+                         ReplacementDatabase db;
+-                        db = json::parse(databaseBytes.begin(), databaseBytes.end(), nullptr, true);
++                        db = json::parse(reinterpret_cast<const char*>(databaseBytes.data()), reinterpret_cast<const char*>(databaseBytes.data()) + databaseBytes.size(), nullptr, true);
+ 
+                         if (db.config.hashVersion <= TMEMHasher::CurrentHashVersion) {
+                             db.resolvePaths(fileSystems[i].get(), uint32_t(i), fileSystemResolvedPaths[i], false, nullptr, &fileSystemStreamSets[i]);
+diff --git a/src/rhi/rt64_render_hooks.cpp b/src/rhi/rt64_render_hooks.cpp
+index 2e60745..f04f64e 100644
+--- a/src/rhi/rt64_render_hooks.cpp
++++ b/src/rhi/rt64_render_hooks.cpp
+@@ -9,6 +9,17 @@ namespace RT64 {
+     static RenderHookDraw *draw = nullptr;
+     static RenderHookDeinit *deinit = nullptr;
+ 
++    RenderFormat GetSwapChainFormat() {
++#   if defined(__ANDROID__)
++        // Android/Adreno & Mali surfaces expose R8G8B8A8_UNORM, not B8G8R8A8_UNORM.
++        // RT64's final present is a shader composite (logical RGBA float -> driver
++        // stores per target format), so swapping the swap chain format is transparent.
++        return RenderFormat::R8G8B8A8_UNORM;
++#   else
++        return RenderFormat::B8G8R8A8_UNORM;
++#   endif
++    }
++
+     RenderHookInit *GetRenderHookInit() {
+         return init;
+     }
+diff --git a/src/rhi/rt64_render_hooks.h b/src/rhi/rt64_render_hooks.h
+index be01701..15f744f 100644
+--- a/src/rhi/rt64_render_hooks.h
++++ b/src/rhi/rt64_render_hooks.h
+@@ -11,6 +11,20 @@ namespace RT64 {
+     using RenderHookDraw = void(RenderCommandList *list, RenderFramebuffer *swapChainFramebuffer);
+     using RenderHookDeinit = void();
+ 
++    // The swap chain's colour format, and the single source of truth for it.
++    //
++    // Every pipeline that renders into the swap chain must be created with this same
++    // format, or the render pass and the pipeline disagree and Vulkan reports
++    // VUID-vkCmdDraw*-renderPass-02684. Android surfaces do not offer B8G8R8A8_UNORM
++    // at all, so the format genuinely differs per platform and the three consumers
++    // (the swap chain itself, the video interface pipelines, and the host's RmlUi
++    // renderer) previously each carried their own copy of the constant.
++    //
++    // This is a function rather than a getFormat() on the created swap chain because
++    // the init render hook -- which is where the host builds its UI pipelines -- runs
++    // BEFORE the swap chain is created, so there is nothing to query at that point.
++    RenderFormat GetSwapChainFormat();
++
+     RenderHookInit *GetRenderHookInit();
+     RenderHookDraw *GetRenderHookDraw();
+     RenderHookDeinit *GetRenderHookDeinit();
+diff --git a/src/shaders/FbCommon.hlsli b/src/shaders/FbCommon.hlsli
+index 973ee67..d40e585 100644
+--- a/src/shaders/FbCommon.hlsli
++++ b/src/shaders/FbCommon.hlsli
+@@ -8,7 +8,17 @@
+ #include "Formats.hlsli"
+ 
+ uint EndianSwapUINT16(uint i) {
+-    return ((i << 8) & 0xFF00) | ((i >> 8) & 0xFF);
++    // Adreno 6xx compatibility: the Qualcomm Vulkan compiler (driver 0746, frozen
++    // 2023) fails to link a compute shader containing the OR-of-two-shifted-and-
++    // -masked pattern `((i << 8) & 0xFF00) | ((i >> 8) & 0xFF)` ("Failed to link
++    // shaders" / VK_ERROR_UNKNOWN from vkCreateComputePipelines), even though the
++    // SPIR-V is valid and links on desktop drivers. Masking a single time after
++    // the OR lowers cleanly. The input is pre-masked to 16 bits first so this stays
++    // bit-for-bit equivalent to the original for arbitrary input (the plain
++    // `(i << 8 | i >> 8) & 0xFFFF` would leak input bits 16-23 through the i >> 8
++    // term). FloatToDepth16, the only caller, already produces a <= 16-bit value.
++    i &= 0xFFFFu;
++    return (i << 8 | i >> 8) & 0xFFFFu;
+ }
+ 
+ // This endian swapping function generates a DXC-LLVM code generation bug when optimizations are enabled. All files that include this 
+diff --git a/src/shaders/RasterPS.hlsl b/src/shaders/RasterPS.hlsl
+index f5beee9..63b7dc4 100644
+--- a/src/shaders/RasterPS.hlsl
++++ b/src/shaders/RasterPS.hlsl
+@@ -258,7 +258,31 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+         resultColor.rgb = lerp(resultColor.rgb, float3(1.0f, 0.0f, 0.0f), 0.5f);
+     }
+ #endif
+-    
++
++#ifdef NO_DUAL_SRC_BLEND
++    // Fallback for devices without dual source blending (e.g. every Mali GPU). There is only
++    // one output, so the blending factor has to travel in its alpha and the pipeline blends
++    // with SRC_ALPHA/INV_SRC_ALPHA instead of the SRC1 factors. That costs us the coverage
++    // value the primary output would otherwise carry, so coverage written to the framebuffer
++    // is wrong wherever the factor takes its place. Keep in sync with RasterShader::createPipeline.
++    //
++    // The condition MUST match whether the bound pipeline actually enabled blending, because
++    // resultAlpha carries the neutral factor 1.0f whenever alphaBlend is false:
++    //   - Ubershaders (DYNAMIC_RENDER_PARAMS) hardcode PipelineCreation::alphaBlend = true, so
++    //     blending is ALWAYS on while the shader decides per draw. The factor must therefore
++    //     always be written; writing coverage instead would blend live geometry at ~8/255
++    //     opacity (or 0 under CVG_DST_SAVE, i.e. invisible).
++    //   - Specialized shaders derive PipelineCreation::alphaBlend from the same predicate used
++    //     here, so blending is off when alphaBlend is false and coverage must be preserved.
++#   ifdef DYNAMIC_RENDER_PARAMS
++    resultColor.a = resultAlpha.a;
++#   else
++    if (alphaBlend) {
++        resultColor.a = resultAlpha.a;
++    }
++#   endif
++#endif
++
+     return true;
+ }
+ 
+@@ -283,7 +307,9 @@ void PSMain(
+     , bool isFrontFace : SV_IsFrontFace
+ #endif
+     , [[vk::location(0)]] [[vk::index(0)]] out float4 pixelColor : SV_TARGET0
++#if !defined(NO_DUAL_SRC_BLEND)
+     , [[vk::location(0)]] [[vk::index(1)]] out float4 pixelAlpha : SV_TARGET1
++#endif
+ )
+ {
+ #if !defined(DYNAMIC_RENDER_PARAMS)
+@@ -300,6 +326,8 @@ void PSMain(
+     }
+ 
+     pixelColor = resultColor;
++#if !defined(NO_DUAL_SRC_BLEND)
+     pixelAlpha = resultAlpha;
++#endif
+ }
+ #endif
+\ No newline at end of file

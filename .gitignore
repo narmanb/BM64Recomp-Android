@@ -73,3 +73,20 @@ gamecontrollerdb.txt
 
 # RSP Microcode recompiled output
 aspMain.cpp
+# Android and local host tools / ROMs
+android/.gradle/
+android/local.properties
+android/**/build/
+android/**/.cxx/
+.gradle/
+build-*/
+*.apk
+*.aab
+*.v64
+*.n64
+*.z64.tmp
+*.keystore
+*.jks
+__pycache__/
+*.pyc
+patches/patches.bin
