@@ -1,4 +1,9 @@
 # Bomberman 64: Recompiled
+
+Android development on `android-port`: see [build instructions and status](docs/ANDROID_PORT.md).
+The ROM-free foundation APK tests launcher/settings/input and is **not playable**;
+the full native game build requires the separately documented ROM-generated sources.
+
 [Bomberman 64: Recompiled](https://github.com/RevoSucks/BM64Recomp) is a project that uses [N64: Recompiled](https://github.com/Mr-Wiseguy/N64Recomp) to **statically recompile** Bomberman 64 into a native port with many new features, enhancements, and extensive mod support. This project uses [RT64](https://github.com/rt64/rt64) as the rendering engine to provide some of these enhancements.
 
 ### **This repository and its releases do not contain game assets. The original game is required to build or run this project.**

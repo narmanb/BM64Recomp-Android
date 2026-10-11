@@ -19,7 +19,7 @@ pads remain in upstream SDL controller/event/binding paths. OR button states; se
 a whole analog vector by magnitude to preserve direction rather than canceling inputs.
 Use a native short-tap latch. Clear touch state on hide/cancel/focus loss/pause.
 
-SharedPreferences owns touch settings: Always On, Automatic (connected controller),
+An atomic private file shared by launcher and game owns touch settings: Always On, Automatic (connected controller),
 Completely Off (no intercepts), 10–100% opacity/default 60%, layout, size, sensitivity,
 deadzone and optional haptics. Launcher always exposes settings and layout editor.
 Automatic uses Android InputManager add/change/remove callbacks, including initial
