@@ -183,6 +183,14 @@ Cloud networking: Gradle needs Java HTTP/HTTPS proxy properties matching the man
 HTTP proxy and the supplied CA trust store; preserve the environment proxy route.
 This session used JDK17 and a local Gradle user-home configuration (not committed).
 
+## APK download
+
+The verified first debug APK is available directly from the `android-port` branch:
+<https://raw.githubusercontent.com/narmanb/BM64Recomp-Android/android-port/downloads/BM64-Android-debug.apk>.
+Checksum and build notes are in `downloads/`. The ChatGPT workspace file link failed
+on the user's phone; GitHub release asset uploads returned an authentication error,
+so this single test APK is stored on the development branch for direct download.
+
 ## Device installation / first test
 
 Install the full APK (`android/app/build/outputs/apk/debug/app-debug.apk`, also copied

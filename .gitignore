@@ -90,3 +90,6 @@ build-*/
 __pycache__/
 *.pyc
 patches/patches.bin
+
+# Verified debug APK hosted here while release uploads are unavailable.
+!downloads/BM64-Android-debug.apk
