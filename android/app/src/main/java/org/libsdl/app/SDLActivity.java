@@ -1,3 +1,4 @@
+// BM64 Android change: UI fullscreen callers enqueue without waiting on their own resize.
 package org.libsdl.app;
 
 import android.app.Activity;
@@ -23,6 +24,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
@@ -877,7 +879,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                     }
                 }
 
-                if (bShouldWait && (SDLActivity.getContext() != null)) {
+                // Only native callers need synchronous dimensions. Waiting on the
+                // UI thread blocks the handler/resize that must satisfy this wait.
+                if (bShouldWait && Looper.myLooper() != Looper.getMainLooper() && (SDLActivity.getContext() != null)) {
                     // We'll wait for the surfaceChanged() method, which will notify us
                     // when called.  That way, we know our current size is really the
                     // size we need, instead of grabbing a size that's still got

@@ -8,13 +8,13 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.4`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.5`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `ad4a0868456b8925830a730e4d33a2ac318ead888f4d4573a7fc29b3f071784c`.
-This is a Vulkan contract/error-handling test build, **not verified playable/stable**.
+APK SHA-256: `d633f63cf85f69faa538f08ce5cf75c42746007811892fdde3b3794ddd20c67b`.
+This is an Android fullscreen/settings update, **not verified playable/stable**.
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
 
@@ -56,8 +56,9 @@ Implemented source:
   creation retries (including same-size windows), and private
   RT64 storage (`detectDataPath=false`, `files/bm64/rt64`). No custom GPU driver.
 
-**No title screen, gameplay, audio, saves, Vulkan rendering, lifecycle recovery
-or performance result has been verified on a physical device.**
+**User screenshots confirm visible native frontend rendering on the S25+. The
+original game title screen, gameplay, audio, saves, lifecycle recovery and performance
+remain unverified on physical hardware.**
 
 ## Android.2 startup and settings fixes
 
@@ -176,6 +177,55 @@ retesting; it is not a verified playable or stable release.** No driver replacem
 game simulation/timing change, controller/touch behavior change or measured FPS
 result is involved. Further GPU failure should return to the launcher with a
 complete startup report rather than continue indefinitely at a black screen.
+
+## Android.5 immersive display and touchscreen settings
+
+User screenshots following Android.4 delivery show the native launcher and native
+Graphics menu rendering on the S25+. This is evidence of **visible frontend
+rendering**, not entry into the original game's title screen or gameplay. Status
+and three-button navigation bars remained visible and obstructed the native menu.
+
+SDL's queued initial `setWindowStyle(false)` overrides the activity's earlier
+one-time hide flags. Android.5 creates the actual SDL window with Vulkan and
+FULLSCREEN_DESKTOP flags, maintains SDL fullscreen state, hides system bars through
+API30 WindowInsetsController (legacy API28 fallback), and restores immersion on
+resume/focus after dialogs. Android's edge swipe can reveal transient navigation;
+it is not disabled. SDL's vendored Java shim has an explicitly marked modification:
+UI callers dispatch style changes without waiting for a resize that their own
+thread must process; native callers retain the bounded resize wait. The production
+window-factory regression previously failed without fullscreen. The Java regression
+extracts the actual SDL dispatch method: it previously blocked the UI for500ms,
+now returns promptly, and still tests native wait/notification.
+
+The native Graphics menu hides Window Mode on Android and routes controller focus
+between aspect ratio and rendering rate. Old Windowed JSON preferences are coerced
+to Fullscreen on Android; the fullscreen hotkey is a no-op there. Desktop options
+and mode behavior remain available.
+
+Native **Settings → Controls → Touchscreen controls** now opens the existing
+Android settings dialog through a Java/native bridge on the UI thread. Launcher
+Touchscreen Settings and Android Back recovery remain available when controls
+are Completely Off. Existing Always On / Automatic / Completely Off modes,
+independent physical input and saved10–100% opacity/default60% are retained. The
+opacity slider now displays its current percentage and updates it immediately.
+Launcher graphics saving preserves the user's MSAA setting instead of silently
+resetting it to None.
+
+Downsampling renders at higher internal resolution and reduces the image to the
+selected output resolution: smoother edges/detail with additional GPU work. It is
+available for Original and Original2x. Start with Off on mobile, then assess on
+device. MSAA is connected to RT64's multisampling configuration and updates;
+unsupported modes are disabled based on renderer/device capabilities. Its visual
+quality, stability and performance in Bomberman64 gameplay on either target device
+are **not yet verified**; the screenshot alone is not a multisampling test.
+
+Full Gradle build, regression suite and signature/ARM64/JNI/16 KiB/ROM exclusion
+checks pass. Both native callback and Java method are present in the APK (Java in
+classes2.dex), and the updated Android assets are packaged. Independent review's
+UI-thread wait finding is fixed; final review found no remaining important issues.
+The update uses the same signing certificate and preserves ROM/settings. Physical
+Android.5 bar hiding/restoration, native touch-settings entry and slider presentation
+still need confirmation.
 
 ## Audited references and dependency pins
 
@@ -325,11 +375,11 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Retest Android.4 on the S25+. If graphics stops or stays black, export the ZIP
-   with complete raw diagnostics and identify the first error. Android.3 initialized
-   and recorded a UI frame, then lost the GPU device; its exported previews omitted
-   the initial error. Visible rendering/gameplay and graphics scrolling need device
-   confirmation. Measure performance only once gameplay is working.
+1. Retest Android.5 fullscreen and settings on the S25+. User screenshots show
+   frontend rendering after Android.4, but the original game title/gameplay is not
+   yet confirmed. Verify bars hide/restoration, Controls → Touchscreen controls,
+   percentage/mode persistence and controller independence. If graphics fails, use
+   the complete ZIP export. Measure performance only once gameplay works.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;

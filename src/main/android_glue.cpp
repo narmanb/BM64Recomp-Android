@@ -15,6 +15,7 @@ namespace {
     JavaVM* vm = nullptr;
     jobject activity = nullptr;
     jmethodID request_document = nullptr;
+    jmethodID touch_settings = nullptr;
     std::mutex document_mutex;
     std::function<void(bool, const std::list<std::filesystem::path>&)> pending;
     bool ready = false, success = false;
@@ -36,6 +37,7 @@ extern "C" JNIEXPORT void JNICALL Java_com_narmanb_bm64_MainActivity_nativeInit(
     activity = env->NewGlobalRef(self);
     jclass cls = env->GetObjectClass(self);
     request_document = env->GetMethodID(cls, "requestOpenDocument", "(Z)V");
+    touch_settings = env->GetMethodID(cls, "showTouchscreenSettings", "()V");
     env->DeleteLocalRef(cls);
     const char* dir = env->GetStringUTFChars(path, nullptr);
     SDL_setenv("APP_FOLDER_PATH", dir, 1);
@@ -111,3 +113,18 @@ void bm64::android::publish_window(void* window) {
     if(previous)ANativeWindow_release(previous);
 }
 void* bm64::android::take_window() {return replacement.exchange(nullptr);}
+
+void bm64::android::show_touch_settings() {
+    JNIEnv* env = nullptr;
+    bool attached = vm && vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_EDETACHED;
+    if (attached && vm->AttachCurrentThread(&env, nullptr) != JNI_OK) env = nullptr;
+    if (env && activity && touch_settings) {
+        env->CallVoidMethod(activity, touch_settings);
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            startup_stage("Could not open touchscreen settings");
+        }
+    }
+    if (attached && env) vm->DetachCurrentThread();
+}

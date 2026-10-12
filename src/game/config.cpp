@@ -124,7 +124,11 @@ namespace ultramodern {
 
     void from_json(const json& j, renderer::GraphicsConfig& config) {
         config.res_option       = from_or_default(j, "res_option",      res_default);
+#ifdef __ANDROID__
+        config.wm_option        = renderer::WindowMode::Fullscreen;
+#else
         config.wm_option        = from_or_default(j, "wm_option",       wm_default());
+#endif
         config.hr_option        = from_or_default(j, "hr_option",       hr_default);
         config.api_option       = from_or_default(j, "api_option",      api_default);
         config.ds_option        = from_or_default(j, "ds_option",       ds_default);

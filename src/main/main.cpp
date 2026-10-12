@@ -151,6 +151,10 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 #elif defined(__ANDROID__) || defined(RT64_SDL_WINDOW_VULKAN)
     flags |= SDL_WINDOW_VULKAN;
 #endif
+#ifdef __ANDROID__
+    // SDL's window-style command must agree with Android's immersive activity.
+    flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+#endif
 
     window = SDL_CreateWindow("Bomberman 64: Recompiled", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1600, 960,  flags);
 #if defined(__linux__) && !defined(__ANDROID__)

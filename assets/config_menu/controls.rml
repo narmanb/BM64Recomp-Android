@@ -11,6 +11,7 @@
                         data-class-toggle--checked="input_device_is_keyboard"
                         onclick="toggle_input_device"
                         style="nav-down: #input_row_button_0_0; nav-up: #tab_controls"
+                        data-style-nav-right="android_platform ? '#android_touch_settings' : '#reset_input_defaults'"
                     >
                         <div class="toggle__border" />
                         <div class="toggle__floater" />
@@ -20,8 +21,15 @@
                         </div>
                     </button>
                 </div>
+                <div data-if="android_platform">
+                    <button class="button" id="android_touch_settings" onclick="android_touch_settings"
+                        style="nav-up:#tab_controls; nav-down:#input_row_button_0_0; nav-left:#cont_kb_toggle; nav-right:#reset_input_defaults">
+                        <div class="button__label">Touchscreen controls</div>
+                    </button>
+                </div>
                 <div>
                     <button
+                        id="reset_input_defaults"
                         class="button button--warning"
                         style="nav-down:#input_row_button_0_0"
                         data-event-click="reset_input_bindings_to_defaults"

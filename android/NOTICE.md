@@ -11,7 +11,9 @@ No copyrighted ROMs or generated game assets are included.
   adapted from narmanb/BMHeroRecomp-android android-port, commit recorded in
   docs/ANDROID_PORT.md, GPL-3.0 (COPYING).
 - org/libsdl/app sources are SDL 2.32.8, zlib license; see `app/src/main/java/org/libsdl/LICENSE.txt`.
-  Native SDL must match this version. Gradle wrapper originates in the reference
+  SDLActivity has a marked BM64 change preventing UI-thread resize waits while
+  retaining native-thread synchronization. Native SDL must match this version.
+  Gradle wrapper originates in the reference
   ports, Apache-2.0; distribution is pinned and SHA-256 checked.
 - RT64/Plume Android changes are adapted from ogdanimal/rt64 and renderbag/plume
   pinned revisions, with retained MIT headers/licenses in those dependencies.

@@ -1,4 +1,7 @@
 #include "recomp_ui.h"
+#ifdef __ANDROID__
+#include "android_support.h"
+#endif
 #include "recomp_input.h"
 #include "zelda_sound.h"
 #include "zelda_config.h"
@@ -25,6 +28,11 @@ Rml::DataModelHandle cheats_model_handle;
 
 // True if controller config menu is open, false if keyboard config menu is open, undefined otherwise
 bool configuring_controller = false;
+#ifdef __ANDROID__
+static bool android_platform = true;
+#else
+static bool android_platform = false;
+#endif
 
 int recompui::config_tab_to_index(recompui::ConfigTab tab) {
     switch (tab) {
@@ -179,6 +187,9 @@ extern SDL_Window* window;
 #endif
 
 void apply_graphics_config(void) {
+#ifdef __ANDROID__
+    new_options.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
+#endif
     ultramodern::renderer::set_graphics_config(new_options);
 #if defined(__linux__) // TODO: Remove once RT64 gets native fullscreen support on Linux
     if (new_options.wm_option == ultramodern::renderer::WindowMode::Fullscreen) {
@@ -688,6 +699,12 @@ public:
                 zelda64::open_quit_game_prompt();
             });
 
+        recompui::register_event(listener, "android_touch_settings",
+            [](const std::string&, Rml::Event&) {
+#ifdef __ANDROID__
+                bm64::android::show_touch_settings();
+#endif
+            });
         recompui::register_event(listener, "toggle_input_device",
             [](const std::string& param, Rml::Event& event) {
                 cur_device = cur_device == recomp::InputDevice::Controller
@@ -763,6 +780,7 @@ public:
                 graphics_model_handle.DirtyVariable("ds_option");
             }
         );
+        constructor.Bind("android_platform", &android_platform);
         bind_option(constructor, "wm_option", &new_options.wm_option);
         bind_option(constructor, "ar_option", &new_options.ar_option);
         bind_option(constructor, "hr_option", &new_options.hr_option);
@@ -854,6 +872,7 @@ public:
             throw std::runtime_error("Failed to make RmlUi data model for the controls config menu");
         }
 
+        constructor.Bind("android_platform", &android_platform);
         constructor.BindFunc("input_count", [](Rml::Variant& out) { out = static_cast<uint64_t>(recomp::get_num_inputs()); } );
         constructor.BindFunc("input_device_is_keyboard", [](Rml::Variant& out) { out = cur_device == recomp::InputDevice::Keyboard; } );
 
@@ -1178,6 +1197,9 @@ void recompui::update_supported_options() {
 }
 
 void recompui::toggle_fullscreen() {
+#ifdef __ANDROID__
+    return;
+#endif
     new_options.wm_option = (new_options.wm_option == ultramodern::renderer::WindowMode::Windowed) ? ultramodern::renderer::WindowMode::Fullscreen : ultramodern::renderer::WindowMode::Windowed;
     apply_graphics_config();
     graphics_model_handle.DirtyVariable("wm_option");

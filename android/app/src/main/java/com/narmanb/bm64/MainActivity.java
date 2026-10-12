@@ -5,6 +5,10 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.View;
 import org.libsdl.app.SDLActivity;
 import java.io.*;
@@ -62,15 +66,41 @@ public class MainActivity extends SDLActivity {
         super.onCreate(state);
         overlay = new com.narmanb.bm64.touch.TouchOverlayController(this);
         overlay.attachTo(mLayout);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN |
-            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        hideSystemBars();
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+    private void hideSystemBars() {
+        if (startupFailure != null) return;
+        // Track fullscreen in SDL as well: its asynchronous window-style handler
+        // otherwise restores the bars and disables SDL's automatic re-hide.
+        SDLActivity.setWindowStyle(true);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(WindowInsets.Type.systemBars());
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+    public void showTouchscreenSettings() {
+        runOnUiThread(() -> {
+            if (overlay != null && !isFinishing() && !isDestroyed()) overlay.showSettings(mLayout);
+        });
     }
     private void foreground(boolean active) {
         if(startupFailure==null)try {nativeSetForeground(active);}catch(UnsatisfiedLinkError e) {}
     }
     @Override protected void onResume() {
         super.onResume();resumed=true;foreground(hasWindowFocus());if(overlay!=null)overlay.onResume();
+        hideSystemBars();
     }
     @Override protected void onPause() {
         resumed=false;foreground(false);if(overlay!=null)overlay.onPause();super.onPause();
@@ -79,6 +109,7 @@ public class MainActivity extends SDLActivity {
         foreground(focused && resumed);
         if(!focused && overlay!=null)overlay.view().release();
         super.onWindowFocusChanged(focused);
+        if (focused && resumed) hideSystemBars();
     }
     @Override public void onBackPressed() {
         new android.app.AlertDialog.Builder(this).setItems(new String[]{"Resume", "Touchscreen Settings", "Return to launcher"}, (d,i)-> {

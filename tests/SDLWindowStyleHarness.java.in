@@ -1,0 +1,43 @@
+// Android objects are stand-ins; dispatch/wait logic below is the real SDL method.
+public final class SDLWindowStyleHarness {
+    static final int COMMAND_CHANGE_WINDOW_STYLE=2;
+    static final class Message {int arg1;Object obj;}
+    static final class Handler {
+        volatile int posted;
+        Message obtainMessage(){return new Message();}
+        boolean sendMessage(Message m){++posted;return true;}
+    }
+    static final class Build {static final class VERSION {static final int SDK_INT=36;}}
+    static final class Context {static final String WINDOW_SERVICE="window";}
+    static final class DisplayMetrics {int widthPixels,heightPixels;}
+    static final class Display {void getRealMetrics(DisplayMetrics m){m.widthPixels=1920;m.heightPixels=1080;}}
+    static final class WindowManager {Display getDefaultDisplay(){return new Display();}}
+    static final class Surface {int getWidth(){return 0;}int getHeight(){return 0;}}
+    static final class SDLActivity {static final Object context=new Object();static Object getContext(){return context;}}
+    static final class Looper {
+        static final Thread main=Thread.currentThread();static final Object mainLooper=new Object(),otherLooper=new Object();
+        static Object getMainLooper(){return mainLooper;}
+        static Object myLooper(){return Thread.currentThread()==main?mainLooper:otherLooper;}
+    }
+    final Handler commandHandler=new Handler();final Surface mSurface=new Surface();
+    Object getSystemService(String name){return new WindowManager();}
+    /* ACTUAL_SEND_COMMAND */
+    static void check(boolean b,String why){if(!b)throw new AssertionError(why);}
+    public static void main(String[] args)throws Exception {
+        Looper.getMainLooper();
+        SDLWindowStyleHarness ui=new SDLWindowStyleHarness();
+        long start=System.nanoTime();ui.sendCommand(2,1);
+        check((System.nanoTime()-start)/1000000<200,"UI thread must not wait for its own queued surface resize");
+        check(ui.commandHandler.posted==1,"UI caller still dispatches fullscreen command");
+        SDLWindowStyleHarness nativeCaller=new SDLWindowStyleHarness();
+        Thread worker=new Thread(()->nativeCaller.sendCommand(2,1));worker.start();
+        long deadline=System.nanoTime()+300000000;
+        while(worker.getState()!=Thread.State.TIMED_WAITING && worker.isAlive() && System.nanoTime()<deadline)Thread.yield();
+        check(worker.getState()==Thread.State.TIMED_WAITING,"Native caller must retain resize wait");
+        synchronized(SDLActivity.context){SDLActivity.context.notifyAll();}
+        worker.join(300);
+        check(!worker.isAlive(),"Native caller resumes after surface resize notification");
+        check(nativeCaller.commandHandler.posted==1,"Native caller dispatches fullscreen command");
+        System.out.println("SDL fullscreen dispatch is nonblocking on UI thread and synchronized for native callers");
+    }
+}

@@ -30,5 +30,6 @@ int main() {
     assert((requestedFlags&SDL_WINDOW_VULKAN)!=0 && "Android window must explicitly select Vulkan");
     assert((requestedFlags&SDL_WINDOW_OPENGL)==0);
     assert((requestedFlags&SDL_WINDOW_RESIZABLE)!=0);
+    assert((requestedFlags&SDL_WINDOW_FULLSCREEN_DESKTOP)==SDL_WINDOW_FULLSCREEN_DESKTOP && "Android must tell SDL to keep the game immersive");
     puts("Android Vulkan window factory passed");
 }

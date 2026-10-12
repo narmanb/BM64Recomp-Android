@@ -57,7 +57,7 @@ final class AndroidSettings {
         ScrollView scroll=new ScrollView(a);scroll.addView(l);
         new AlertDialog.Builder(a).setTitle("Graphics Settings").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)-> {
             try {cfg.put("ar_option",aspect.getSelectedItemPosition()==0?"Original":"Expand");cfg.put("res_option",res[resolution.getSelectedItemPosition()]);
-                cfg.put("rr_option",fps[rate.getSelectedItemPosition()]);cfg.put("rr_manual_value",60);cfg.put("api_option","Vulkan");cfg.put("msaa_option","None");
+                cfg.put("rr_option",fps[rate.getSelectedItemPosition()]);cfg.put("rr_manual_value",60);cfg.put("api_option","Vulkan");
                 cfg.put("wm_option","Fullscreen");cfg.put("developer_mode",false);save(a,"graphics.json",cfg);
             }catch(Exception e){error(a,e);}
         }).show();

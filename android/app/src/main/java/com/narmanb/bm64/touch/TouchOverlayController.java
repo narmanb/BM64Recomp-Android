@@ -251,10 +251,12 @@ public final class TouchOverlayController implements android.hardware.input.Inpu
                     persist();
                 }));
 
-        root.addView(label("Opacity (10%–100%)"));
+        TextView opacityValue = label("Opacity: " + Math.round(layout.opacity * 100) + "% (10%–100%)");
+        root.addView(opacityValue);
         root.addView(slider(layout.opacity, TouchLayout.OPACITY_MIN, TouchLayout.OPACITY_MAX,
                 value -> {
                     layout.opacity = value;
+                    opacityValue.setText("Opacity: " + Math.round(value * 100) + "% (10%–100%)");
                     view.setLayout(layout);
                     persist();
                 }));

@@ -47,7 +47,12 @@ def verify(path, sdk, foundation=False):
             for function in ('nativeSetState','nativeClearState','nativePollPreview','nativeIsMenuOpen','nativeRequestMenuToggle'):
                 assert 'Java_com_narmanb_bm64_touch_NativeTouch_'+function in symbols,'missing JNI '+function
             if not foundation:
-                lib.write_bytes(z.read('lib/arm64-v8a/libBM64.so'))
+                game_library=z.read('lib/arm64-v8a/libBM64.so')
+                # Native UI calls this Java activity method through GetMethodID.
+                # Search all dex files: multidex may place the activity in classes2.dex.
+                assert b'showTouchscreenSettings' in game_library, 'missing native touch settings callback'
+                assert any(b'showTouchscreenSettings' in z.read(n) for n in names if n.endswith('.dex')), 'missing Java touch settings callback'
+                lib.write_bytes(game_library)
                 symbols=subprocess.check_output(['readelf','--dyn-syms','--wide',lib],text=True)
                 for function in ('SDL_main','Java_com_narmanb_bm64_MainActivity_nativeInit','Java_com_narmanb_bm64_MainActivity_nativeDocumentResult','Java_com_narmanb_bm64_MainActivity_nativeSetForeground','Java_com_narmanb_bm64_MainActivity_nativeControllerSensitivity'):
                     assert function in symbols,'missing game entry '+function

@@ -64,6 +64,17 @@ PYCODE
 else
     echo "Menu event test skipped: run the Android dependency configure to fetch pinned SDL headers."
 fi
+python3 - "$build/SDLWindowStyleHarness.java" <<'SDL_JAVA'
+from pathlib import Path
+import sys
+source=Path('android/app/src/main/java/org/libsdl/app/SDLActivity.java').read_text()
+start=source.index('    boolean sendCommand(int command, Object data)')
+end=source.index('\n    // C functions we call',start)
+template=Path('tests/SDLWindowStyleHarness.java.in').read_text()
+Path(sys.argv[1]).write_text(template.replace('    /* ACTUAL_SEND_COMMAND */',source[start:end]))
+SDL_JAVA
+javac -d "$build/classes" "$build/SDLWindowStyleHarness.java"
+java -cp "$build/classes" SDLWindowStyleHarness
 java_src=android/app/src/main/java/com/narmanb/bm64
 javac -d "$build/classes" "$java_src"/touch/{TouchControl,TouchLayout,TouchPad,TouchVisibility,TouchStore}.java "$java_src/RomImporter.java" "$java_src/DiagnosticFiles.java" tests/{TouchHarness,TouchStoreHarness,RomImporterHarness,DiagnosticFilesHarness}.java
 java -cp "$build/classes" com.narmanb.bm64.DiagnosticFilesHarness
