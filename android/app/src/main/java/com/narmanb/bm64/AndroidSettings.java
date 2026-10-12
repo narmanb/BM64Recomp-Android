@@ -52,11 +52,30 @@ final class AndroidSettings {
         Spinner aspect=options(a,l,"Aspect ratio",new String[]{"Original 4:3","Widescreen"},cfg.optString("ar_option","Expand").equals("Original")?0:1);
         String[] res={"Original","Original2x","Auto"};
         Spinner resolution=options(a,l,"Internal resolution",new String[]{"1x","2x","Match window"},index(res,cfg.optString("res_option","Original2x")));
+        int[] downsampleValues={1,2,4};
+        int downsample=cfg.optInt("ds_option",1);
+        Spinner supersampling=options(a,l,"Supersampling / downsampling",new String[]{"Off","2x — smoother edges","4x — highest GPU cost"},downsample==4?2:downsample==2?1:0);
+        text(a,l,"Renders at 2x or 4x the selected resolution in each direction, then reduces the image. Only applies to 1x or 2x internal resolution; Match window ignores it.");
+        resolution.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> parent,View view,int position,long id) {supersampling.setEnabled(position!=2);}
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        supersampling.setEnabled(resolution.getSelectedItemPosition()!=2);
+        String[] msaa={"None","MSAA2X","MSAA4X","MSAA8X"};
+        Spinner antialiasing=options(a,l,"MS anti-aliasing",new String[]{"Off","2x","4x","8x — highest GPU cost"},index(msaa,cfg.optString("msaa_option","None")));
+        text(a,l,"Smooths polygon edges. GPU support is checked when starting the game; unsupported modes fall back. Supersampling also smooths textures and can be used without MSAA.");
+        String[] precision={"Auto","Off","On"};
+        Spinner color=options(a,l,"Framebuffer color precision",new String[]{"Automatic (recommended)","Standard","High — may reduce color banding"},index(precision,cfg.optString("hpfb_option","Auto")));
+        text(a,l,"High precision uses more GPU memory and bandwidth, with a fallback to Standard if the GPU lacks support. This changes internal color calculations, not display HDR. Takes effect on the next game launch.");
+        String[] hud={"Original","Clamp16x9","Full"};
+        Spinner placement=options(a,l,"HUD placement",new String[]{"Original 4:3","16:9","Expand to screen edges"},index(hud,cfg.optString("hr_option","Clamp16x9")));
         String[] fps={"Original","Manual","Display"};
         Spinner rate=options(a,l,"Rendering frame rate",new String[]{"Original","60 FPS target","Display refresh"},index(fps,cfg.optString("rr_option","Manual")));
         ScrollView scroll=new ScrollView(a);scroll.addView(l);
         new AlertDialog.Builder(a).setTitle("Graphics Settings").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)-> {
             try {cfg.put("ar_option",aspect.getSelectedItemPosition()==0?"Original":"Expand");cfg.put("res_option",res[resolution.getSelectedItemPosition()]);
+                cfg.put("ds_option",downsampleValues[supersampling.getSelectedItemPosition()]);cfg.put("msaa_option",msaa[antialiasing.getSelectedItemPosition()]);
+                cfg.put("hpfb_option",precision[color.getSelectedItemPosition()]);cfg.put("hr_option",hud[placement.getSelectedItemPosition()]);
                 cfg.put("rr_option",fps[rate.getSelectedItemPosition()]);cfg.put("rr_manual_value",60);cfg.put("api_option","Vulkan");
                 cfg.put("wm_option","Fullscreen");cfg.put("developer_mode",false);save(a,"graphics.json",cfg);
             }catch(Exception e){error(a,e);}

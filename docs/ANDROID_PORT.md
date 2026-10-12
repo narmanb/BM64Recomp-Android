@@ -8,13 +8,14 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.5`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.6`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `d633f63cf85f69faa538f08ce5cf75c42746007811892fdde3b3794ddd20c67b`.
-This is an Android fullscreen/settings update, **not verified playable/stable**.
+APK SHA-256: `eb9543cafd276f0bab3f42cf1c0f68c8fab9523c6c162c963c7e37708c8a3195`.
+The user reports the previous installation working. **Android.6's added quality
+choices are build-verified; their device appearance/performance are not verified.**
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
 
@@ -56,9 +57,9 @@ Implemented source:
   creation retries (including same-size windows), and private
   RT64 storage (`detectDataPath=false`, `files/bm64/rt64`). No custom GPU driver.
 
-**User screenshots confirm visible native frontend rendering on the S25+. The
-original game title screen, gameplay, audio, saves, lifecycle recovery and performance
-remain unverified on physical hardware.**
+**User screenshots confirm visible native frontend rendering on the S25+, followed
+by a general report that everything appears to be working. Individual gameplay,
+audio/save/lifecycle results and measured performance have not been supplied.**
 
 ## Android.2 startup and settings fixes
 
@@ -227,6 +228,67 @@ The update uses the same signing certificate and preserves ROM/settings. Physica
 Android.5 bar hiding/restoration, native touch-settings entry and slider presentation
 still need confirmation.
 
+## Android.6 optional graphics quality
+
+After Android.5, the user reports "Everything appears to be working". This is a
+user-reported improvement on the current installation; no feature-by-feature
+results or measured performance were supplied. No device is attached here.
+
+Launcher **Graphics Settings** now exposes existing renderer quality options:
+
+- **Supersampling / downsampling:** Off, 2x, 4x. Multiplies each internal image
+  dimension, then reduces to the selected 1x/2x output. It costs roughly four or
+  sixteen times the pixel work before other rendering costs. Match window ignores
+  downsampling; the launcher disables that selector but retains its saved value.
+- **MS anti-aliasing:** Off, 2x, 4x, 8x. Smooths polygon edges where the GPU/RT64
+  supports the selected mode. Existing 8x preferences remain representable when
+  saving other launcher settings. Unsupported startup modes fall back; native
+  settings retain capability-gated controls.
+- **Framebuffer color precision:** Automatic, Standard, High. Higher precision
+  can reduce color quantization/banding and costs memory/bandwidth. This is internal
+  RGBA16_UNORM rendering, not display HDR or replacement high-resolution textures.
+  It is selected in the launcher before renderer creation, for the next game launch.
+- **HUD placement:** Original 4:3, 16:9, Expand to screen edges.
+
+Current defaults remain 2x resolution, downsampling Off, MSAA Off, Automatic color
+precision, widescreen, 16:9 HUD and 60 FPS rendering target. Game simulation and
+timing are unchanged. Start with **Match window** for a sharper image, then try
+MSAA 2x if supported. For supersampling use 2x internal resolution plus 2x
+downsampling; avoid combining maximum settings without measuring on the device.
+
+Vulkan high-precision attachment/blending and storage support are optional.
+Android Plume checks the enabled extended-storage-format feature, required optimal
+format bits, and actual sampled/transfer/color-target and storage-image usages.
+RT64 falls back to Standard before shader/target creation if these checks fail,
+including Automatic on a GPU whose memory heuristic otherwise prefers High.
+The diagnostic log records support and fallback. Conservatively require storage
+support even with downsampling currently off, since it can be enabled in-game.
+
+Android MSAA checks query the active color/depth formats and exact image usage
+support, intersected with Vulkan's general framebuffer limits. Depth queries include
+the sample-locations-compatible flag where applicable. Multisample counts also
+require the extension's exact custom-sample-location count mask; 1x is retained.
+The native menu uses exact supported bits, so a 4x-only device exposes 4x without
+exposing unsupported 2x/8x. Desktop selection and
+sample-count policy are preserved. These guards address capability mismatches;
+they do not guarantee driver stability or sufficient memory at maximum settings.
+
+Host regressions compile actual production decisions/functions: precision fallback,
+active format selection, image format/usage/sample limits and required precision
+features, alongside Android/desktop policies. Missing guards first failed, then
+passed after implementation. Existing ROM-format rejection, input, touch settings,
+press/release, diagnostics and window/lifecycle dispatch checks are retained.
+The original uploaded retail ROM path is absent in this resumed environment, so
+the optional real-ROM acceptance test is skipped this time; its earlier results
+remain recorded above. Generated game/RSP sources remain available for the build.
+New quality modes require visual/performance testing on both target devices.
+
+Final full Gradle `assembleDebug` succeeded. APK v2 signature, matching prior update
+certificate, package/version, ARM64/JNI, 16 KiB ELF/ZIP alignment and ROM exclusion
+checks passed. Packaged DEX contains the new quality choices; the game library
+contains the compatibility guards. The host suite passes (optional uploaded-ROM
+case skipped); independent final review found no remaining important issues.
+
 ## Audited references and dependency pins
 
 | Source | Revision |
@@ -375,11 +437,11 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Retest Android.5 fullscreen and settings on the S25+. User screenshots show
-   frontend rendering after Android.4, but the original game title/gameplay is not
-   yet confirmed. Verify bars hide/restoration, Controls → Touchscreen controls,
-   percentage/mode persistence and controller independence. If graphics fails, use
-   the complete ZIP export. Measure performance only once gameplay works.
+1. Compare Android.6 quality options on the S25+ and RP5, one change at a time.
+   The user reports the current installation working; confirm individual levels,
+   graphics effects, MSAA/precision fallback, fullscreen restoration and touch/input
+   behavior. If graphics fails, use the complete ZIP export. Measure sustained
+   performance rather than assuming the rendering target was reached.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;
