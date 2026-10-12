@@ -48,13 +48,14 @@ final class AndroidSettings {
     static void graphics(Activity a) {
         if(!editable(a))return;
         JSONObject cfg=read(a,"graphics.json");LinearLayout l=column(a);
-        text(a,l,"System Vulkan. Rendering rate does not change gameplay timing. Device performance has not been measured.");
+        text(a,l,"Rendering FPS does not change game timing.");
         Spinner aspect=options(a,l,"Aspect ratio",new String[]{"Original 4:3","Widescreen"},cfg.optString("ar_option","Expand").equals("Original")?0:1);
         String[] res={"Original","Original2x","Auto"};
         Spinner resolution=options(a,l,"Internal resolution",new String[]{"1x","2x","Match window"},index(res,cfg.optString("res_option","Original2x")));
         String[] fps={"Original","Manual","Display"};
         Spinner rate=options(a,l,"Rendering frame rate",new String[]{"Original","60 FPS target","Display refresh"},index(fps,cfg.optString("rr_option","Manual")));
-        new AlertDialog.Builder(a).setTitle("Graphics Settings").setView(l).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)-> {
+        ScrollView scroll=new ScrollView(a);scroll.addView(l);
+        new AlertDialog.Builder(a).setTitle("Graphics Settings").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)-> {
             try {cfg.put("ar_option",aspect.getSelectedItemPosition()==0?"Original":"Expand");cfg.put("res_option",res[resolution.getSelectedItemPosition()]);
                 cfg.put("rr_option",fps[rate.getSelectedItemPosition()]);cfg.put("rr_manual_value",60);cfg.put("api_option","Vulkan");cfg.put("msaa_option","None");
                 cfg.put("wm_option","Fullscreen");cfg.put("developer_mode",false);save(a,"graphics.json",cfg);

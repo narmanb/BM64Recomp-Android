@@ -8,13 +8,13 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(2026-10-11). Package `com.narmanb.bm64`, version `1.0.0-android.1`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.2`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `75649b7f1ade839c2ced6d9ab590b40f07677d943525031bc002ff1fa56a734d`.
-This is the first full build for device testing, **not verified playable/stable**.
+APK SHA-256: `db61050879975853daacb9132b7dbf003cdb0adf387d79640cb51159acc070da`.
+This is an updated full build for device testing, **not verified playable/stable**.
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
 
@@ -58,6 +58,31 @@ Implemented source:
 
 **No title screen, gameplay, audio, saves, Vulkan rendering, lifecycle recovery
 or performance result has been verified on a physical device.**
+
+## Android.2 startup and settings fixes
+
+The user tested Android.1 on a Samsung Galaxy S25+ (SM-S936U1, Android16/API36,
+stock Adreno830). ROM selection worked, but Start returned to the launcher.
+The current-attempt log reached RT64 initialization and reported
+`vkCreateAndroidSurfaceKHR failed with error code 0xC46535FF`, which is
+`VK_ERROR_NATIVE_WINDOW_IN_USE_KHR` (-1000000001). Older historical crash entries
+also appeared; no current native tombstone was supplied for those crashes.
+
+SDL2 defaults an Android window with no explicit graphics backend to OpenGL and
+creates an EGL surface. That EGL surface claims the native window before RT64
+creates its Vulkan surface. Android.2 explicitly sets `SDL_WINDOW_VULKAN` in the
+application window factory and RT64's fallback, retaining the separate Plume
+`ANativeWindow*` interface. It logs actual SDL window flags for the next device
+report. No driver replacement or simulation timing change is involved.
+A host regression runs the real window factory with intercepted SDL calls: it
+failed without the fix and now confirms Vulkan, no OpenGL and resizable flags.
+The disabled Android desktop-preload path no longer emits a misleading failure.
+
+The graphics settings content now sits in a ScrollView, with Save/Cancel outside
+its scrolling area, so small landscape screens can reach every option. Full
+Gradle build and APK checks passed. Android.2 has the same signing certificate and
+package as Android.1; install as an update to retain imported ROM and settings.
+**The updated surface creation and scrolling still require a device retest.**
 
 ## Audited references and dependency pins
 
@@ -185,7 +210,7 @@ This session used JDK17 and a local Gradle user-home configuration (not committe
 
 ## APK download
 
-The verified first debug APK is available directly from the `android-port` branch:
+The build-verified updated debug APK is available directly from the `android-port` branch:
 <https://raw.githubusercontent.com/narmanb/BM64Recomp-Android/android-port/downloads/BM64-Android-debug.apk>.
 Checksum and build notes are in `downloads/`. The ChatGPT workspace file link failed
 on the user's phone; GitHub release asset uploads returned an authentication error,
@@ -207,8 +232,10 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Run the first physical-device test; build/package validation is complete but
-   runtime initialization and gameplay remain unverified.
+1. Retest Android.2 on the S25+: verify graphics settings scrolling and Vulkan
+   startup after the Android.1 surface-ownership failure. Export a new crash report
+   if it fails; confirm its version and SDL window flags. Build/package validation
+   is complete, but successful runtime initialization and gameplay remain unverified.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;
@@ -267,5 +294,11 @@ adb install -r /path/to/BM64-Android-debug.apk
   fonts/controller database, ZIP integrity and ROM exclusion checks passed.
   `PLAYABLE=true` generated configuration verified; game dependencies resolve to
   bundled SDL2/C++ shared libraries and Android platform libraries.
-- No Android device attached (`adb devices` empty); RP5/S25+ title screen, gameplay,
-  audio, saves, touch/physical behavior, Vulkan/lifecycle and FPS remain **not tested**.
+- Android.2 full Gradle assembleDebug succeeded. Real-ROM import and host input/touch
+  checks, production window-factory regression, dependency patch restore/apply/
+  idempotence, APK v2 signature, matching update certificate, JNI/ABI/16 KiB alignment
+  and ROM exclusion checks passed.
+- No Android device attached. The user's S25+ Android.1 startup failed at Vulkan
+  surface creation as recorded above. Android.2 device retest and all RP5 testing
+  remain pending; successful title screen, gameplay, audio, saves, Vulkan/lifecycle
+  recovery and FPS are **not verified**.

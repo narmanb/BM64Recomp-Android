@@ -148,7 +148,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 #if defined(__APPLE__)
     flags |= SDL_WINDOW_METAL;
-#elif defined(RT64_SDL_WINDOW_VULKAN)
+#elif defined(__ANDROID__) || defined(RT64_SDL_WINDOW_VULKAN)
     flags |= SDL_WINDOW_VULKAN;
 #endif
 
@@ -166,6 +166,11 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
         exit_error("Failed to create window: %s\n", SDL_GetError());
     }
 
+#ifdef __ANDROID__
+    const uint32_t actualFlags = SDL_GetWindowFlags(window);
+    printf("SDL window flags: 0x%08X (Vulkan=%d OpenGL=%d)\n", actualFlags,
+        (actualFlags & SDL_WINDOW_VULKAN) != 0, (actualFlags & SDL_WINDOW_OPENGL) != 0);
+#endif
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
     SDL_GetWindowWMInfo(window, &wmInfo);
@@ -557,9 +562,11 @@ int main(int argc, char** argv) {
     bool preloaded = preload_executable(preload_context);
     #endif
 
+#ifndef __ANDROID__
     if (!preloaded) {
         fprintf(stderr, "Failed to preload executable!\n");
     }
+#endif
 
 #ifdef _WIN32
     // Set up high resolution timing period.

@@ -17,6 +17,16 @@ if [[ ! -f "$sdl_headers/SDL.h" ]]; then
     sdl_headers=$(dirname "${sdl_headers:-/missing/SDL.h}")
 fi
 if [[ -f "$sdl_headers/SDL.h" ]]; then
+    python3 - "$build/window_factory.inc" <<'WINDOW_CODE'
+from pathlib import Path
+import sys
+source=Path('src/main/main.cpp').read_text()
+start=source.index('ultramodern::renderer::WindowHandle create_window(')
+end=source.index('\n}\n',start)+3
+Path(sys.argv[1]).write_text(source[start:end])
+WINDOW_CODE
+    "${CXX:-c++}" -std=c++20 -D__ANDROID__ -I"$build" -I"$sdl_headers" tests/test_android_window.cpp -o "$build/window"
+    "$build/window"
     "${CXX:-c++}" -std=c++20 -Iinclude -I"$sdl_headers" tests/test_android_menu.cpp -o "$build/menu"
     "$build/menu"
     python3 - "$build/controller_defaults.inc" <<'PYCODE'

@@ -383,7 +383,7 @@ index 72faede..a8e1af0 100644
  };
 \ No newline at end of file
 diff --git a/src/hle/rt64_application_window.cpp b/src/hle/rt64_application_window.cpp
-index 86ae197..ac3208c 100755
+index 86ae197..48f2d20 100755
 --- a/src/hle/rt64_application_window.cpp
 +++ b/src/hle/rt64_application_window.cpp
 @@ -11,6 +11,8 @@
@@ -406,6 +406,15 @@ index 86ae197..ac3208c 100755
          if (SDL_VideoInit(nullptr) != 0) {
              printf("Failed to init SDL2 video: %s\n", SDL_GetError());
              assert(false && "Failed to init SDL2 video");
+@@ -133,7 +133,7 @@ namespace RT64 {
+         uint32_t flags = SDL_WINDOW_RESIZABLE;
+         # if defined(__APPLE__)
+         flags |= SDL_WINDOW_METAL;
+-        # elif defined(RT64_SDL_WINDOW_VULKAN)
++        # elif defined(__ANDROID__) || defined(RT64_SDL_WINDOW_VULKAN)
+         flags |= SDL_WINDOW_VULKAN;
+         #endif
+         sdlWindow = SDL_CreateWindow(windowTitle, bounds.left, bounds.top, bounds.width, bounds.height, flags);
 @@ -145,10 +145,12 @@ namespace RT64 {
          SDL_GetWindowWMInfo(sdlWindow, &wmInfo);
  #   if defined(_WIN32)
