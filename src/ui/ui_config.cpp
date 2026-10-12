@@ -778,9 +778,14 @@ public:
                 graphics_model_handle.DirtyVariable("options_changed");
                 graphics_model_handle.DirtyVariable("ds_info");
                 graphics_model_handle.DirtyVariable("ds_option");
+                graphics_model_handle.DirtyVariable("downsampling_supported");
             }
         );
         constructor.Bind("android_platform", &android_platform);
+        constructor.BindFunc("downsampling_supported", [](Rml::Variant& out) {
+            out = new_options.res_option == ultramodern::renderer::Resolution::Original ||
+                new_options.res_option == ultramodern::renderer::Resolution::Original2x;
+        });
         bind_option(constructor, "wm_option", &new_options.wm_option);
         bind_option(constructor, "ar_option", &new_options.ar_option);
         bind_option(constructor, "hr_option", &new_options.hr_option);
@@ -796,13 +801,20 @@ public:
             });
         constructor.BindFunc("ds_option",
             [](Rml::Variant& out) {
-                if (new_options.res_option == ultramodern::renderer::Resolution::Auto) {
+                if (new_options.res_option != ultramodern::renderer::Resolution::Original &&
+                    new_options.res_option != ultramodern::renderer::Resolution::Original2x) {
                     out = 1;
                 } else {
                     out = new_options.ds_option;
                 }
             },
             [](const Rml::Variant& in) {
+#ifdef __ANDROID__
+                // Checking disabled Off can emit a programmatic RmlUi Change event.
+                // Keep the saved preference for returning to a supported resolution.
+                if (new_options.res_option != ultramodern::renderer::Resolution::Original &&
+                    new_options.res_option != ultramodern::renderer::Resolution::Original2x) return;
+#endif
                 new_options.ds_option = in.Get<int>();
                 graphics_model_handle.DirtyVariable("options_changed");
                 graphics_model_handle.DirtyVariable("ds_info");
@@ -819,10 +831,11 @@ public:
             });
         constructor.BindFunc("ds_info",
             [](Rml::Variant& out) {
+                out = "";
                 switch (new_options.res_option) {
                     default:
                     case ultramodern::renderer::Resolution::Auto:
-                        out = "Downsampling is not available at auto resolution";
+                        out = "Downsampling is available only at 1x or 2x resolution";
                         return;
                     case ultramodern::renderer::Resolution::Original:
                         if (new_options.ds_option == 2) {
@@ -835,7 +848,7 @@ public:
                         if (new_options.ds_option == 2) {
                             out = "Rendered in 960p and scaled to 480p";
                         } else if (new_options.ds_option == 4) {
-                            out = "Rendered in 4K and scaled to 480p";
+                            out = "Rendered in 1920p and scaled to 480p";
                         }
                         return;
                 }

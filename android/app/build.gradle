@@ -8,8 +8,8 @@ android {
         applicationId foundation ? 'com.narmanb.bm64.foundation' : 'com.narmanb.bm64'
         minSdk 28
         targetSdk 35
-        versionCode 6
-        versionName foundation ? '1.0.0-android.foundation.6' : '1.0.0-android.6'
+        versionCode 7
+        versionName foundation ? '1.0.0-android.foundation.7' : '1.0.0-android.7'
         manifestPlaceholders = [appLabel: foundation ? 'BM64 Android Foundation' : 'Bomberman 64']
         buildConfigField 'boolean', 'PLAYABLE', (!foundation).toString()
         ndk { abiFilters 'arm64-v8a' }

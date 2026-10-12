@@ -8,13 +8,13 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.6`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.7`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `eb9543cafd276f0bab3f42cf1c0f68c8fab9523c6c162c963c7e37708c8a3195`.
-The user reports the previous installation working. **Android.6's added quality
+APK SHA-256: `39bdba6faeb693fcdc7fd900677a4675d6ecba8e11308112720d493b662cb8f3`.
+The user reports a previous installation working. **Android.7's added resolution
 choices are build-verified; their device appearance/performance are not verified.**
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
@@ -30,7 +30,8 @@ Implemented source:
 - Separate `:game` SDL process and native startup checkpoints/stdout/stderr,
   persisted Java failures and diagnostic ZIP export; historical system native
   tombstone/ANR trace included when Android makes it available.
-- Launcher graphics defaults and physical mapping/deadzone/sensitivity settings.
+- Launcher graphics defaults, manual 1x/2x/3x/4x/6x resolution choices (also in-game),
+  quality settings and physical mapping/deadzone/sensitivity settings.
   Upstream SDL integrated/USB/Bluetooth detection, event-driven menus and native
   in-game remapping are retained. Stock mappings: South=A place bomb, West=B
   lift/talk, triggers=Z detonate, RB=R stop bomb, right stick=C camera/zoom,
@@ -51,7 +52,7 @@ Implemented source:
   release/clear on hiding, cancellation, focus loss, pause and edit transitions.
   Native gameplay input is neutral while the game activity is paused/unfocused,
   independently of touch visibility.
-- Reviewed RT64/Plume Android patches keep BM64's existing dependency revisions
+- Reviewed runtime/RT64/Plume Android patches keep BM64's existing dependency revisions
   and rectangle-aspect command. Host DXC/file_to_c, stock Adreno compute inlining,
   SDL native window, surface replacement with owned-reference handoff and failed
   creation retries (including same-size windows), and private
@@ -289,6 +290,47 @@ checks passed. Packaged DEX contains the new quality choices; the game library
 contains the compatibility guards. The host suite passes (optional uploaded-ROM
 case skipped); independent final review found no remaining important issues.
 
+## Android.7 higher direct resolution scales
+
+The Android launcher and native Graphics menu add **3x, 4x and 6x** internal
+resolution alongside 1x/2x and Auto/Match screen. These are real RT64 manual render
+multipliers (3.0/4.0/6.0), not labels for supersampling a 480p output. For the usual
+240-line game output, their approximate heights are 720p, 960p and 1440p; dimensions
+can vary with the game's framebuffer and selected aspect ratio. Original texture
+and sprite detail remains limited by the original assets.
+
+The default stays 2x. Start with 3x or 4x and measure sustained performance before
+using 6x. Relative to 2x, 6x has nine times the pixel area before other costs.
+Gameplay simulation/timing is unchanged. Device appearance, available memory and
+performance at the new scales have not been verified here.
+
+Downsampling remains available only at 1x/2x. Higher scales and Auto use an effective
+downsample factor of one, retaining the saved 2x/4x preference for switching back.
+The native settings binding must ignore programmatic radio Change events while
+downsampling is disabled, so displaying Off cannot overwrite the saved choice.
+Native controller navigation skips disabled controls. Android resolution labels
+are compact (1x/2x/3x/4x/6x/Auto); desktop labels and choices remain intact.
+
+`android/patches/runtime-android.patch` extends only Android's Resolution enum and
+JSON mapping at the existing N64ModernRuntime pin. Existing enum values are
+preserved, and the desktop enum/serializer remain unchanged. The patch is part of
+the same revision-checked apply/restore utility as RT64 and Plume. Clean desktop
+sources can be restored without changing any dependency history or gitlink.
+
+Host tests compile the actual renderer selection and native downsampling binding,
+using the real runtime JSON mappings. They cover scale/serialization round trips,
+supersampling isolation, mode transitions and desktop policy. Missing resolution
+mapping and the programmatic preference reset each failed before their fixes.
+The optional original uploaded retail ROM test is still skipped because the
+attachment path is absent; existing generated game/RSP sources remain available.
+
+Full native Gradle build succeeded. Host regression suite passed, with the optional
+missing-ROM case skipped. APK v2 signature and unchanged update certificate,
+package/version, ARM64/JNI, 16 KiB ELF/ZIP alignment and ROM exclusion passed.
+New mode strings are present in both DEX and the native game library; updated
+in-game assets are packaged. Final independent review found no remaining important
+issues. This verifies build/configuration contracts, not device graphics or FPS.
+
 ## Audited references and dependency pins
 
 | Source | Revision |
@@ -437,7 +479,7 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Compare Android.6 quality options on the S25+ and RP5, one change at a time.
+1. Compare Android.7 resolution/quality options on the S25+ and RP5, one change at a time.
    The user reports the current installation working; confirm individual levels,
    graphics effects, MSAA/precision fallback, fullscreen restoration and touch/input
    behavior. If graphics fails, use the complete ZIP export. Measure sustained

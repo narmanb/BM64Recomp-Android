@@ -1,0 +1,40 @@
+diff --git a/ultramodern/include/ultramodern/config.hpp b/ultramodern/include/ultramodern/config.hpp
+index a8cd8e0..abed124 100644
+--- a/ultramodern/include/ultramodern/config.hpp
++++ b/ultramodern/include/ultramodern/config.hpp
+@@ -12,6 +12,12 @@ namespace ultramodern {
+             Original,
+             Original2x,
+             Auto,
++#ifdef __ANDROID__
++            // Append Android scales without changing existing option values.
++            Original3x,
++            Original4x,
++            Original6x,
++#endif
+             OptionCount
+         };
+         enum class WindowMode {
+@@ -80,11 +86,22 @@ namespace ultramodern {
+         const GraphicsConfig& get_graphics_config();
+         void set_graphics_config(const GraphicsConfig& new_config);
+ 
++#ifdef __ANDROID__
+         NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::Resolution, {
+             {ultramodern::renderer::Resolution::Original, "Original"},
+             {ultramodern::renderer::Resolution::Original2x, "Original2x"},
+             {ultramodern::renderer::Resolution::Auto, "Auto"},
++            {ultramodern::renderer::Resolution::Original3x, "Original3x"},
++            {ultramodern::renderer::Resolution::Original4x, "Original4x"},
++            {ultramodern::renderer::Resolution::Original6x, "Original6x"},
+         });
++#else
++        NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::Resolution, {
++            {ultramodern::renderer::Resolution::Original, "Original"},
++            {ultramodern::renderer::Resolution::Original2x, "Original2x"},
++            {ultramodern::renderer::Resolution::Auto, "Auto"},
++        });
++#endif
+ 
+         NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::WindowMode, {
+             {ultramodern::renderer::WindowMode::Windowed, "Windowed"},

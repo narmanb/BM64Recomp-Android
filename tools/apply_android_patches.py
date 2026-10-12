@@ -5,7 +5,8 @@ import subprocess
 import sys
 import argparse
 ROOT=Path(__file__).resolve().parents[1]
-PATCHES=(('lib/rt64','rt64-android.patch','71b5906f0b991459744dabfcc68d04616ac71797'),
+PATCHES=(('lib/N64ModernRuntime','runtime-android.patch','0bb76b0fc7078cdec37ec3d220af4aaf8212c611'),
+         ('lib/rt64','rt64-android.patch','71b5906f0b991459744dabfcc68d04616ac71797'),
          ('lib/rt64/src/contrib/plume','plume-android.patch','51b1ad443b9f202c5cfc930ae25345d3f2ba7716'))
 def apply(restore=False):
     for path, name, revision in PATCHES:

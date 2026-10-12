@@ -30,6 +30,12 @@ if [[ -f "$sdl_headers/SDL.h" ]]; then
                 "tests/$test.cpp" -o "$build/$test-$platform"
             "$build/$test-$platform"
         done
+        for test in test_resolution_scales test_resolution_binding; do
+            "${CXX:-c++}" -std=c++20 "${platform_flags[@]}" -I"$build" \
+                -Ilib/N64ModernRuntime/ultramodern/include -Ilib/N64ModernRuntime/thirdparty \
+                "tests/$test.cpp" -o "$build/$test-$platform"
+            "$build/$test-$platform"
+        done
     done
     python3 - "$build/window_factory.inc" <<'WINDOW_CODE'
 from pathlib import Path

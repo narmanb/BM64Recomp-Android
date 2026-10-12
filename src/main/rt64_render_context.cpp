@@ -153,6 +153,17 @@ void set_application_user_config(RT64::Application* application, const ultramode
             application->userConfig.resolutionMultiplier = 2.0 * std::max(config.ds_option, 1);
             application->userConfig.downsampleMultiplier = std::max(config.ds_option, 1);
             break;
+#ifdef __ANDROID__
+        case ultramodern::renderer::Resolution::Original3x:
+        case ultramodern::renderer::Resolution::Original4x:
+        case ultramodern::renderer::Resolution::Original6x:
+            application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            application->userConfig.resolutionMultiplier = config.res_option == ultramodern::renderer::Resolution::Original3x ? 3.0 :
+                config.res_option == ultramodern::renderer::Resolution::Original4x ? 4.0 : 6.0;
+            // Higher scales are direct output resolution, without stacking supersampling.
+            application->userConfig.downsampleMultiplier = 1;
+            break;
+#endif
     }
 
     switch (config.hr_option) {

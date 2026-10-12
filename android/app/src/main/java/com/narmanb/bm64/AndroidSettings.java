@@ -50,17 +50,18 @@ final class AndroidSettings {
         JSONObject cfg=read(a,"graphics.json");LinearLayout l=column(a);
         text(a,l,"Rendering FPS does not change game timing.");
         Spinner aspect=options(a,l,"Aspect ratio",new String[]{"Original 4:3","Widescreen"},cfg.optString("ar_option","Expand").equals("Original")?0:1);
-        String[] res={"Original","Original2x","Auto"};
-        Spinner resolution=options(a,l,"Internal resolution",new String[]{"1x","2x","Match window"},index(res,cfg.optString("res_option","Original2x")));
+        String[] res={"Original","Original2x","Original3x","Original4x","Original6x","Auto"};
+        Spinner resolution=options(a,l,"Internal resolution",new String[]{"1x — about 240p","2x — about 480p","3x — about 720p","4x — about 960p","6x — about 1440p","Match screen"},index(res,cfg.optString("res_option","Original2x")));
+        text(a,l,"Higher resolution sharpens 3D edges and detail but costs GPU time and memory. Start with 3x or 4x; 6x is an optional high quality setting. Original textures keep their original detail.");
         int[] downsampleValues={1,2,4};
         int downsample=cfg.optInt("ds_option",1);
         Spinner supersampling=options(a,l,"Supersampling / downsampling",new String[]{"Off","2x — smoother edges","4x — highest GPU cost"},downsample==4?2:downsample==2?1:0);
-        text(a,l,"Renders at 2x or 4x the selected resolution in each direction, then reduces the image. Only applies to 1x or 2x internal resolution; Match window ignores it.");
+        text(a,l,"Renders at 2x or 4x the selected resolution in each direction, then reduces the image. Only applies to 1x or 2x internal resolution; higher scales and Match screen ignore the saved supersampling setting.");
         resolution.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> parent,View view,int position,long id) {supersampling.setEnabled(position!=2);}
+            public void onItemSelected(AdapterView<?> parent,View view,int position,long id) {supersampling.setEnabled(position<2);}
             public void onNothingSelected(AdapterView<?> parent) {}
         });
-        supersampling.setEnabled(resolution.getSelectedItemPosition()!=2);
+        supersampling.setEnabled(resolution.getSelectedItemPosition()<2);
         String[] msaa={"None","MSAA2X","MSAA4X","MSAA8X"};
         Spinner antialiasing=options(a,l,"MS anti-aliasing",new String[]{"Off","2x","4x","8x — highest GPU cost"},index(msaa,cfg.optString("msaa_option","None")));
         text(a,l,"Smooths polygon edges. GPU support is checked when starting the game; unsupported modes fall back. Supersampling also smooths textures and can be used without MSAA.");
