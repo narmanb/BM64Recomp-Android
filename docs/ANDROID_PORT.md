@@ -8,13 +8,13 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.2`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.3`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `db61050879975853daacb9132b7dbf003cdb0adf387d79640cb51159acc070da`.
-This is an updated full build for device testing, **not verified playable/stable**.
+APK SHA-256: `b6caa3753363c38146591613e2f8b5aef4ce4465a932029b59110e9804d260d5`.
+This is a diagnostic full build for the reported black screen, **not verified playable/stable**.
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
 
@@ -83,6 +83,43 @@ its scrolling area, so small landscape screens can reach every option. Full
 Gradle build and APK checks passed. Android.2 has the same signing certificate and
 package as Android.1; install as an update to retain imported ROM and settings.
 **The updated surface creation and scrolling still require a device retest.**
+
+## Android.2 black-screen investigation
+
+The user reports Android.2 no longer exits/crashes on Start on the Galaxy S25+,
+but remains at a black screen indefinitely. This confirms an improvement over
+the earlier surface-ownership crash, **not successful rendering or gameplay**.
+The black-screen attempt's current startup report has been requested; its stopping
+point is not yet known. ROM selection worked in the previous test. No physical
+device is connected to this environment, so the stall cannot be reproduced here.
+
+Android.3 adds diagnostic instrumentation without changing graphics configuration,
+synchronization, simulation timing or the game-start sequence. RT64 logs setup
+phases and named startup shader pipeline calls with monotonic timestamps and
+native thread IDs. It traces the first queued present and only the first three
+rendered frames: image acquisition, UI drawing, GPU submission/fence wait and
+presentation. Frontend checkpoints distinguish renderer-ready, first screen
+update and first UI layout/geometry/composition. The Android-private stdout/stderr
+log captures these entries; launcher Copy Crash Report works even without a crash.
+Pipeline "returned" records call completion, not successful compilation; inspect
+nearby Vulkan error messages as well. Successful presentation return is not proof
+of visible or correct game content. Desktop logging is disabled.
+
+Android.3 Gradle `assembleDebug` succeeded in 2m12s. APK v2 signature, matching
+update certificate, ARM64/JNI/16 KiB alignment/ROM exclusion checks and existing
+real-ROM/input/touch host checks passed. The packaged game library contains all
+new diagnostic markers. Independent review replayed all 18 RT64 patch paths against
+the pinned revision and found no important issues. No device result for this build
+is available yet.
+
+**Android.3 is a diagnostic build, not a confirmed fix for the black screen.**
+Install it as an update, Start, wait about 30 seconds, then use Android Back →
+Return to launcher → Copy Crash Report. If the activity does not respond, return
+through Android's home screen and reopen the launcher to copy the existing log;
+do not tap Start again before copying because that clears the attempt's log.
+Do not replace the driver or change several graphics settings during this capture.
+The report will determine whether initialization, shader linking, UI rendering,
+GPU work, swapchain presentation or a later step needs correction.
 
 ## Audited references and dependency pins
 
@@ -232,10 +269,10 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Retest Android.2 on the S25+: verify graphics settings scrolling and Vulkan
-   startup after the Android.1 surface-ownership failure. Export a new crash report
-   if it fails; confirm its version and SDL window flags. Build/package validation
-   is complete, but successful runtime initialization and gameplay remain unverified.
+1. Capture the S25+ black-screen startup report with Android.3 diagnostics.
+   Android.2 reportedly survives launch but stays black. Identify the actual blocked
+   stage before making further renderer changes. Successful initialization, visible
+   rendering and gameplay remain unverified; graphics scrolling needs confirmation.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;
@@ -299,6 +336,12 @@ adb install -r /path/to/BM64-Android-debug.apk
   idempotence, APK v2 signature, matching update certificate, JNI/ABI/16 KiB alignment
   and ROM exclusion checks passed.
 - No Android device attached. The user's S25+ Android.1 startup failed at Vulkan
-  surface creation as recorded above. Android.2 device retest and all RP5 testing
-  remain pending; successful title screen, gameplay, audio, saves, Vulkan/lifecycle
+  surface creation as recorded above. Android.2 survives launch but stays black
+  according to the user; Android.3 diagnostics and all RP5 testing remain pending; successful title screen, gameplay, audio, saves, Vulkan/lifecycle
   recovery and FPS are **not verified**.
+
+- Android.3 full Gradle build, APK structure/signature and unchanged signing
+  certificate checks pass; diagnostic stage strings are present in libBM64.so.
+  Existing ROM/input/touch tests pass. Instrumentation changes no graphics settings,
+  driver selection, synchronization or simulation timing. Device log capture is
+  required before identifying the black-screen root cause.

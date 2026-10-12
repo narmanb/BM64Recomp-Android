@@ -1,4 +1,7 @@
 #include <atomic>
+#ifdef __ANDROID__
+#include "android_support.h"
+#endif
 static std::atomic_bool android_menu_capturing{true};
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -551,6 +554,12 @@ void recompui::activate_mouse() {
 }
 
 void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer* swap_chain_framebuffer) {
+#ifdef __ANDROID__
+    static bool firstDraw = true;
+    const bool traceDraw = firstDraw;
+    firstDraw = false;
+    if (traceDraw) bm64::android::startup_stage("First UI frame begin");
+#endif
 
     apply_background_input_mode();
 
@@ -775,9 +784,21 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
         prev_width = width;
         prev_height = height;
 
+#ifdef __ANDROID__
+        if (traceDraw) bm64::android::startup_stage("First UI layout update begin");
+#endif
         ui_state->context->Update();
+#ifdef __ANDROID__
+        if (traceDraw) bm64::android::startup_stage("First UI geometry render begin");
+#endif
         ui_state->context->Render();
+#ifdef __ANDROID__
+        if (traceDraw) bm64::android::startup_stage("First UI composition begin");
+#endif
         ui_state->render_interface.end(command_list, swap_chain_framebuffer);
+#ifdef __ANDROID__
+        if (traceDraw) bm64::android::startup_stage("First UI frame recorded");
+#endif
     }
 }
 

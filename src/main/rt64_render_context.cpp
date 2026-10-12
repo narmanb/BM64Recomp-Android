@@ -315,6 +315,10 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     thread_id = window_handle.thread_id;
 #endif
     setup_result = map_setup_result(app->setup(thread_id));
+#ifdef __ANDROID__
+    bm64::android::startup_stage(setup_result == ultramodern::renderer::SetupResult::Success ?
+        "RT64 Vulkan setup complete" : "RT64 Vulkan setup failed");
+#endif
     // Get the API that RT64 chose.
     chosen_api = map_graphics_api(app->chosenGraphicsAPI);
     if (setup_result != ultramodern::renderer::SetupResult::Success) {
@@ -340,6 +344,9 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     }
 
     high_precision_fb_enabled = app->shaderLibrary->usesHDR;
+#ifdef __ANDROID__
+    bm64::android::startup_stage("Renderer context ready");
+#endif
 }
 
 zelda64::renderer::RT64Context::~RT64Context() = default;
@@ -357,7 +364,16 @@ void zelda64::renderer::RT64Context::update_screen() {
         bm64::android::handoff_window(native,app ? app->swapChain.get() : nullptr,ANativeWindow_release);
     }
 #endif
+#ifdef __ANDROID__
+    static bool firstUpdate = true;
+    const bool traceUpdate = firstUpdate;
+    firstUpdate = false;
+    if (traceUpdate) bm64::android::startup_stage("First screen update begin");
+#endif
     app->updateScreen();
+#ifdef __ANDROID__
+    if (traceUpdate) bm64::android::startup_stage("First screen update queued");
+#endif
 }
 
 void zelda64::renderer::RT64Context::shutdown() {

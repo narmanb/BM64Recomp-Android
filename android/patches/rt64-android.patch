@@ -470,10 +470,109 @@ index 86ae197..48f2d20 100755
          SDL_GetWindowPosition(windowHandle, &newWindowLeft, &newWindowTop);
  #   elif defined(__linux__)
 diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
-index 3227ab1..1d41696 100644
+index 3227ab1..716e5c2 100644
 --- a/src/hle/rt64_present_queue.cpp
 +++ b/src/hle/rt64_present_queue.cpp
-@@ -501,7 +501,11 @@ namespace RT64 {
+@@ -3,6 +3,7 @@
+ //
+ 
+ #include "rt64_present_queue.h"
++#include "common/rt64_android_diagnostics.h"
+ 
+ #include "common/rt64_thread.h"
+ #include "rhi/rt64_render_hooks.h"
+@@ -93,6 +94,14 @@ namespace RT64 {
+     }
+ 
+     void PresentQueue::threadPresent(const Present &present, bool &swapChainValid) {
++#ifdef __ANDROID__
++        static thread_local unsigned startupPresents = 0;
++        const bool traceStartup = startupPresents < 3;
++        if (traceStartup) ++startupPresents;
++#else
++        constexpr bool traceStartup = false;
++#endif
++        if (traceStartup) androidStartupLog("Frame rendering begin");
+         FramebufferManager &fbManager = ext.sharedResources->framebufferManager;
+         RenderTargetManager &targetManager = ext.sharedResources->renderTargetManager;
+         const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
+@@ -300,7 +309,9 @@ namespace RT64 {
+             uint32_t swapChainIndex = 0;
+             const bool presentFrame = (i < framesToPresent) && swapChainValid;
+             if (presentFrame) {
++                if (traceStartup) androidStartupLog("Swapchain image acquisition begin");
+                 swapChainValid = ext.swapChain->acquireTexture(acquiredSemaphore.get(), &swapChainIndex);
++                if (traceStartup) androidStartupLog(swapChainValid ? "Swapchain image acquired" : "Swapchain image acquisition failed");
+             }
+ 
+             if (presentFrame && swapChainValid) {
+@@ -350,7 +361,9 @@ namespace RT64 {
+ 
+                 RenderHookDraw *drawHook = GetRenderHookDraw();
+                 if (drawHook != nullptr) {
++                    if (traceStartup) androidStartupLog("UI draw hook begin");
+                     drawHook(commandList, swapChainFramebuffer);
++                    if (traceStartup) androidStartupLog("UI draw hook returned");
+                 }
+ 
+                 {
+@@ -364,8 +377,11 @@ namespace RT64 {
+                     const RenderCommandList *commandList = ext.presentGraphicsWorker->commandList.get();
+                     RenderCommandSemaphore *waitSemaphore = acquiredSemaphore.get();
+                     RenderCommandSemaphore *signalSemaphore = drawSemaphores[swapChainIndex].get();
++                    if (traceStartup) androidStartupLog("Frame GPU submission begin");
+                     ext.presentGraphicsWorker->commandQueue->executeCommandLists(&commandList, 1, &waitSemaphore, 1, &signalSemaphore, 1, ext.presentGraphicsWorker->commandFence.get());
++                    if (traceStartup) androidStartupLog("Frame GPU fence wait begin");
+                     ext.presentGraphicsWorker->wait();
++                    if (traceStartup) androidStartupLog("Frame GPU fence signaled");
+                 }
+             }
+ 
+@@ -395,12 +411,16 @@ namespace RT64 {
+                 }
+ 
+                 if (presentWaitEnabled) {
++                    if (traceStartup) androidStartupLog("Present latency wait begin");
+                     ext.swapChain->wait();
++                    if (traceStartup) androidStartupLog("Present latency wait returned");
+                 }
+ 
+                 RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
+                 presentTimestamp = Timer::current();
++                if (traceStartup) androidStartupLog("Frame presentation begin");
+                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
++                if (traceStartup) androidStartupLog(swapChainValid ? "Frame presentation returned success" : "Frame presentation returned failure");
+                 presentProfiler.logAndRestart();
+             }
+         }
+@@ -432,6 +452,8 @@ namespace RT64 {
+ 
+     void PresentQueue::threadLoop() {
+         Thread::setCurrentThreadName("RT64 Present");
++        androidStartupLog("Present thread entered");
++        bool traceFirstPresent = true;
+ 
+         // Create the semaphore the acquire method will use.
+         acquiredSemaphore = ext.device->createCommandSemaphore();
+@@ -465,13 +487,17 @@ namespace RT64 {
+ 
+             if (processCursor >= 0) {
+                 std::unique_lock<std::mutex> threadLock(threadMutex);
++                if (traceFirstPresent) androidStartupLog("First present queued");
+                 const bool needsResize = ext.swapChain->needsResize() || !swapChainValid;
+                 if (needsResize) {
+                     ext.presentGraphicsWorker->commandList->begin();
+                     ext.presentGraphicsWorker->commandList->end();
++                    if (traceFirstPresent) androidStartupLog("First swapchain resize GPU flush begin");
+                     ext.presentGraphicsWorker->execute();
+                     ext.presentGraphicsWorker->wait();
++                    if (traceFirstPresent) androidStartupLog("First swapchain resize begin");
+                     swapChainValid = ext.swapChain->resize();
++                    if (traceFirstPresent) androidStartupLog(swapChainValid ? "First swapchain resize succeeded" : "First swapchain resize failed");
+                     swapChainFramebuffers.clear();
+ 
+                     if (swapChainValid) {
+@@ -501,16 +527,23 @@ namespace RT64 {
                      }
                  }
  
@@ -485,7 +584,27 @@ index 3227ab1..1d41696 100644
 +                skipPresent = skipPresent || ext.swapChain->isEmpty() || !swapChainValid;
  
                  Present &present = presents[processCursor];
++                if (traceFirstPresent) androidStartupLog("First present workload wait begin");
                  ext.workloadQueue->waitForWorkloadId(present.workloadId);
++                if (traceFirstPresent) androidStartupLog("First present workload ready");
+ 
+                 if (!presentThreadRunning) {
+                     continue;
+                 }
+ 
+                 if (skipPresent) {
++                    if (traceFirstPresent) androidStartupLog("First present skipped (invalid swapchain or superseded)");
+                     skipInterpolation();
+                     notifyPresentId(present);
+                 }
+@@ -528,6 +561,7 @@ namespace RT64 {
+                     threadAdvanceBarrier();
+                 }
+ 
++                traceFirstPresent = false;
+                 processCursor = -1;
+             }
+         }
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
 index 9fae0d4..77c3a00 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
@@ -703,18 +822,226 @@ index 3b991ff..f01fe2e 100644
      };
  
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
-index d1c5273..4973699 100644
+index d1c5273..845d771 100644
 --- a/src/render/rt64_shader_library.cpp
 +++ b/src/render/rt64_shader_library.cpp
-@@ -5,6 +5,7 @@
+@@ -3,8 +3,10 @@
+ //
+ 
  #include "rt64_shader_library.h"
++#include "common/rt64_android_diagnostics.h"
  
  #include "common/rt64_common.h"
 +#include "rhi/rt64_render_hooks.h"
  #include "shared/rt64_render_target_copy.h"
  #include "shared/rt64_rsp_vertex_test_z.h"
  
-@@ -599,7 +600,7 @@ namespace RT64 {
+@@ -265,7 +267,9 @@ namespace RT64 {
+             
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(BicubicScalingCSBlobDXIL, BicubicScalingCSBlobSPIRV, BicubicScalingCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(bicubicScaling.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline bicubicScaling begin");
+             bicubicScaling.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline bicubicScaling returned");
+         }
+ 
+         // Box filter.
+@@ -279,7 +283,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(BoxFilterCSBlobDXIL, BoxFilterCSBlobSPIRV, BoxFilterCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(boxFilter.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline boxFilter begin");
+             boxFilter.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline boxFilter returned");
+         }
+ 
+         // Raytracing compose.
+@@ -298,7 +304,9 @@ namespace RT64 {
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = pixelShader.get();
++            androidStartupLog("Pipeline compose begin");
+             compose.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline compose returned");
+         }
+ 
+         /*
+@@ -352,7 +360,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(IdleCSBlobDXIL, IdleCSBlobSPIRV, IdleCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(idle.pipelineLayout.get(), computeShader.get(), 1, 1, 1);
++            androidStartupLog("Pipeline idle begin");
+             idle.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline idle returned");
+         }
+ 
+         // Framebuffer changes clear.
+@@ -365,7 +375,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(FbChangesClearCSBlobDXIL, FbChangesClearCSBlobSPIRV, FbChangesClearCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(fbChangesClear.pipelineLayout.get(), computeShader.get(), 1, 1, 1);
++            androidStartupLog("Pipeline fbChangesClear begin");
+             fbChangesClear.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline fbChangesClear returned");
+         }
+ 
+         // Framebuffer read any changes and full.
+@@ -381,10 +393,14 @@ namespace RT64 {
+             fbReadAnyFull.pipelineLayout = layoutBuilder.create(device);
+ 
+             std::unique_ptr<RenderShader> anyChangesShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyChangesCSBlobDXIL, FbReadAnyChangesCSBlobSPIRV, FbReadAnyChangesCSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline fbReadAnyChanges begin");
+             fbReadAnyChanges.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyChanges.pipelineLayout.get(), anyChangesShader.get(), 8, 8, 1));
++            androidStartupLog("Pipeline fbReadAnyChanges returned");
+ 
+             std::unique_ptr<RenderShader> fullShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyFullCSBlobDXIL, FbReadAnyFullCSBlobSPIRV, FbReadAnyFullCSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline fbReadAnyFull begin");
+             fbReadAnyFull.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyFull.pipelineLayout.get(), fullShader.get(), 8, 8, 1));
++            androidStartupLog("Pipeline fbReadAnyFull returned");
+         }
+ 
+         // Framebuffer Reinterpretation.
+@@ -398,7 +414,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(FbReinterpretCSBlobDXIL, FbReinterpretCSBlobSPIRV, FbReinterpretCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(fbReinterpret.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline fbReinterpret begin");
+             fbReinterpret.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline fbReinterpret returned");
+         }
+ 
+         // Framebuffer write color or depth.
+@@ -415,13 +433,19 @@ namespace RT64 {
+             fbWriteDepthMS.pipelineLayout = layoutBuilder.create(device);
+ 
+             std::unique_ptr<RenderShader> colorShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteColorCSBlobDXIL, FbWriteColorCSBlobSPIRV, FbWriteColorCSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline fbWriteColor begin");
+             fbWriteColor.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteColor.pipelineLayout.get(), colorShader.get(), 8, 8, 1));
++            androidStartupLog("Pipeline fbWriteColor returned");
+ 
+             std::unique_ptr<RenderShader> depthShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSBlobDXIL, FbWriteDepthCSBlobSPIRV, FbWriteDepthCSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline fbWriteDepth begin");
+             fbWriteDepth.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepth.pipelineLayout.get(), depthShader.get(), 8, 8, 1));
++            androidStartupLog("Pipeline fbWriteDepth returned");
+ 
+             std::unique_ptr<RenderShader> depthShaderMS = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSMSBlobDXIL, FbWriteDepthCSMSBlobSPIRV, FbWriteDepthCSMSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline fbWriteDepthMS begin");
+             fbWriteDepthMS.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepthMS.pipelineLayout.get(), depthShaderMS.get(), 8, 8, 1));
++            androidStartupLog("Pipeline fbWriteDepthMS returned");
+         }
+ 
+         // Gaussian filter.
+@@ -435,7 +459,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(GaussianFilterRGB3x3CSBlobDXIL, GaussianFilterRGB3x3CSBlobSPIRV, GaussianFilterRGB3x3CSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(gaussianFilterRGB3x3.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline gaussianFilterRGB3x3 begin");
+             gaussianFilterRGB3x3.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline gaussianFilterRGB3x3 returned");
+         }
+ 
+         // Histogram average.
+@@ -449,7 +475,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(HistogramAverageCSBlobDXIL, HistogramAverageCSBlobSPIRV, HistogramAverageCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(histogramAverage.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline histogramAverage begin");
+             histogramAverage.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline histogramAverage returned");
+         }
+ 
+         // Histogram clear.
+@@ -462,7 +490,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(HistogramClearCSBlobDXIL, HistogramClearCSBlobSPIRV, HistogramClearCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(histogramClear.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline histogramClear begin");
+             histogramClear.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline histogramClear returned");
+         }
+ 
+         // Histogram set.
+@@ -476,7 +506,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(HistogramSetCSBlobDXIL, HistogramSetCSBlobSPIRV, HistogramSetCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(histogramSet.pipelineLayout.get(), computeShader.get(), 1, 1, 1);
++            androidStartupLog("Pipeline histogramSet begin");
+             histogramSet.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline histogramSet returned");
+         }
+ 
+         // Luminance histogram.
+@@ -490,7 +522,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(LuminanceHistogramCSBlobDXIL, LuminanceHistogramCSBlobSPIRV, LuminanceHistogramCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(luminanceHistogram.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline luminanceHistogram begin");
+             luminanceHistogram.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline luminanceHistogram returned");
+         }
+ 
+         // RSP Modify.
+@@ -504,7 +538,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPModifyCSBlobDXIL, RSPModifyCSBlobSPIRV, RSPModifyCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(rspModify.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
++            androidStartupLog("Pipeline rspModify begin");
+             rspModify.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline rspModify returned");
+         }
+ 
+         // RSP Process.
+@@ -518,7 +554,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPProcessCSBlobDXIL, RSPProcessCSBlobSPIRV, RSPProcessCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(rspProcess.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
++            androidStartupLog("Pipeline rspProcess begin");
+             rspProcess.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline rspProcess returned");
+         }
+ 
+         // RSP Smooth Normal.
+@@ -532,7 +570,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPSmoothNormalCSBlobDXIL, RSPSmoothNormalCSBlobSPIRV, RSPSmoothNormalCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(rspSmoothNormal.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
++            androidStartupLog("Pipeline rspSmoothNormal begin");
+             rspSmoothNormal.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline rspSmoothNormal returned");
+         }
+ 
+         // RSP World.
+@@ -546,7 +586,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPWorldCSBlobDXIL, RSPWorldCSBlobSPIRV, RSPWorldCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(rspWorld.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
++            androidStartupLog("Pipeline rspWorld begin");
+             rspWorld.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline rspWorld returned");
+         }
+ 
+         // Texture Copy.
+@@ -566,7 +608,9 @@ namespace RT64 {
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = pixelShader.get();
++            androidStartupLog("Pipeline textureCopy begin");
+             textureCopy.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline textureCopy returned");
+         }
+ 
+         // Texture Decode.
+@@ -580,7 +624,9 @@ namespace RT64 {
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(TextureDecodeCSBlobDXIL, TextureDecodeCSBlobSPIRV, TextureDecodeCSBlobMSL, "CSMain", shaderFormat));
+             RenderComputePipelineDesc pipelineDesc(textureDecode.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
++            androidStartupLog("Pipeline textureDecode begin");
+             textureDecode.pipeline = device->createComputePipeline(pipelineDesc);
++            androidStartupLog("Pipeline textureDecode returned");
+         }
+ 
+         // Video Interface.
+@@ -599,11 +645,13 @@ namespace RT64 {
              RenderGraphicsPipelineDesc pipelineDesc;
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pixelShader = regularShader.get();
@@ -723,6 +1050,129 @@ index d1c5273..4973699 100644
              pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
++            androidStartupLog("Pipeline videoInterfaceNearest begin");
+             videoInterfaceNearest.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline videoInterfaceNearest returned");
+ 
+             layoutBuilder.begin();
+             layoutBuilder.addPushConstant(0, 0, sizeof(interop::VideoInterfaceCB), RenderShaderStageFlag::PIXEL);
+@@ -613,11 +661,15 @@ namespace RT64 {
+             videoInterfacePixel.pipelineLayout = layoutBuilder.create(device);
+ 
+             pipelineDesc.pipelineLayout = videoInterfaceLinear.pipelineLayout.get();
++            androidStartupLog("Pipeline videoInterfaceLinear begin");
+             videoInterfaceLinear.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline videoInterfaceLinear returned");
+ 
+             pipelineDesc.pixelShader = pixelShader.get();
+             pipelineDesc.pipelineLayout = videoInterfacePixel.pipelineLayout.get();
++            androidStartupLog("Pipeline videoInterfacePixel begin");
+             videoInterfacePixel.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline videoInterfacePixel returned");
+         }
+     }
+ 
+@@ -773,7 +825,9 @@ namespace RT64 {
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = colorShader.get();
+             pipelineDesc.multisampling = multisampling;
++            androidStartupLog("Pipeline fbChangesDrawColor begin");
+             fbChangesDrawColor.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline fbChangesDrawColor returned");
+ 
+             std::unique_ptr<RenderShader> depthShader = device->createShader(CREATE_SHADER_INPUTS(FbChangesDrawDepthPSBlobDXIL, FbChangesDrawDepthPSBlobSPIRV, FbChangesDrawDepthPSBlobMSL, "PSMain", shaderFormat));
+             pipelineDesc.pipelineLayout = fbChangesDrawDepth.pipelineLayout.get();
+@@ -782,7 +836,9 @@ namespace RT64 {
+             pipelineDesc.depthFunction = RenderComparisonFunction::ALWAYS;
+             pipelineDesc.depthWriteEnabled = true;
+             pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
++            androidStartupLog("Pipeline fbChangesDrawDepth begin");
+             fbChangesDrawDepth.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline fbChangesDrawDepth returned");
+         }
+ 
+         // Copy color to depth and depth to color.
+@@ -805,13 +861,17 @@ namespace RT64 {
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pipelineLayout = rtCopyDepthToColor.pipelineLayout.get();
+             pipelineDesc.pixelShader = depthToColorShader.get();
++            androidStartupLog("Pipeline rtCopyDepthToColor begin");
+             rtCopyDepthToColor.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline rtCopyDepthToColor returned");
+ 
+             if (RtCopyDepthToColorPSMSBlob != nullptr) {
+                 std::unique_ptr<RenderShader> depthToColorMSShader = device->createShader(RtCopyDepthToColorPSMSBlob, RtCopyDepthToColorPSMSBlobSize, "PSMain", shaderFormat);
+                 pipelineDesc.pixelShader = depthToColorMSShader.get();
+                 pipelineDesc.multisampling = multisampling;
++                androidStartupLog("Pipeline rtCopyDepthToColorMS begin");
+                 rtCopyDepthToColorMS.pipeline = device->createGraphicsPipeline(pipelineDesc);
++                androidStartupLog("Pipeline rtCopyDepthToColorMS returned");
+             }
+ 
+             std::unique_ptr<RenderShader> colorToDepthShader = device->createShader(RtCopyColorToDepthPSBlob, RtCopyColorToDepthPSBlobSize, "PSMain", shaderFormat);
+@@ -822,13 +882,17 @@ namespace RT64 {
+             pipelineDesc.pipelineLayout = rtCopyColorToDepth.pipelineLayout.get();
+             pipelineDesc.pixelShader = colorToDepthShader.get();
+             pipelineDesc.multisampling = RenderMultisampling();
++            androidStartupLog("Pipeline rtCopyColorToDepth begin");
+             rtCopyColorToDepth.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline rtCopyColorToDepth returned");
+ 
+             if (RtCopyColorToDepthPSMSBlob != nullptr) {
+                 std::unique_ptr<RenderShader> colorToDepthMSShader = device->createShader(RtCopyColorToDepthPSMSBlob, RtCopyColorToDepthPSMSBlobSize, "PSMain", shaderFormat);
+                 pipelineDesc.pixelShader = colorToDepthMSShader.get();
+                 pipelineDesc.multisampling = multisampling;
++                androidStartupLog("Pipeline rtCopyColorToDepthMS begin");
+                 rtCopyColorToDepthMS.pipeline = device->createGraphicsPipeline(pipelineDesc);
++                androidStartupLog("Pipeline rtCopyColorToDepthMS returned");
+             }
+         }
+ 
+@@ -849,7 +913,9 @@ namespace RT64 {
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = pixelShader.get();
+             pipelineDesc.multisampling = multisampling;
++            androidStartupLog("Pipeline postProcess begin");
+             postProcess.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline postProcess returned");
+         }
+         
+         // Raytracing debug.
+@@ -874,7 +940,9 @@ namespace RT64 {
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = pixelShader.get();
+             pipelineDesc.multisampling = multisampling;
++            androidStartupLog("Pipeline debug begin");
+             debug.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline debug returned");
+         }
+ 
+         // RSP Vertex Test Z.
+@@ -890,10 +958,14 @@ namespace RT64 {
+             rspVertexTestZMS.pipelineLayout = layoutBuilder.create(device);
+ 
+             std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPVertexTestZCSBlobDXIL, RSPVertexTestZCSBlobSPIRV, RSPVertexTestZCSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline rspVertexTestZ begin");
+             rspVertexTestZ.pipeline = device->createComputePipeline(RenderComputePipelineDesc(rspVertexTestZ.pipelineLayout.get(), computeShader.get(), 1, 1, 1));
++            androidStartupLog("Pipeline rspVertexTestZ returned");
+ 
+             std::unique_ptr<RenderShader> computeShaderMS = device->createShader(CREATE_SHADER_INPUTS(RSPVertexTestZCSMSBlobDXIL, RSPVertexTestZCSMSBlobSPIRV, RSPVertexTestZCSMSBlobMSL, "CSMain", shaderFormat));
++            androidStartupLog("Pipeline rspVertexTestZMS begin");
+             rspVertexTestZMS.pipeline = device->createComputePipeline(RenderComputePipelineDesc(rspVertexTestZMS.pipelineLayout.get(), computeShaderMS.get(), 1, 1, 1));
++            androidStartupLog("Pipeline rspVertexTestZMS returned");
+         }
+ 
+         // Texture Resolve.
+@@ -913,7 +985,9 @@ namespace RT64 {
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = pixelShader.get();
++            androidStartupLog("Pipeline textureResolve begin");
+             textureResolve.pipeline = device->createGraphicsPipeline(pipelineDesc);
++            androidStartupLog("Pipeline textureResolve returned");
+         }
+     }
+ };
 diff --git a/src/render/rt64_texture_cache.cpp b/src/render/rt64_texture_cache.cpp
 index 0848f3e..39a140e 100644
 --- a/src/render/rt64_texture_cache.cpp
@@ -863,3 +1313,130 @@ index f5beee9..63b7dc4 100644
  }
  #endif
 \ No newline at end of file
+diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
+index 785de27..fdb54bb 100644
+--- a/src/hle/rt64_application.cpp
++++ b/src/hle/rt64_application.cpp
+@@ -3,6 +3,7 @@
+ //
+ 
+ #include "rt64_application.h"
++#include "common/rt64_android_diagnostics.h"
+ #include "rhi/rt64_render_hooks.h"
+ 
+ #include <cinttypes>
+@@ -297,9 +298,12 @@ namespace RT64 {
+         // Call the init hook if one was attached.
+         RenderHookInit *initHook = GetRenderHookInit();
+         if (initHook != nullptr) {
++            androidStartupLog("UI initialization begin");
+             initHook(renderInterface.get(), device.get());
++            androidStartupLog("UI initialization complete");
+         }
+ 
++        androidStartupLog("Render workers begin");
+         // Create all the render workers.
+         drawDataUploader = std::make_unique<BufferUploader>(device.get());
+         transformsUploader = std::make_unique<BufferUploader>(device.get());
+@@ -331,7 +335,9 @@ namespace RT64 {
+             swapChainDesc.enablePresentWait = true;
+         }
+ 
++        androidStartupLog("Swapchain creation begin");
+         swapChain = presentGraphicsWorker->commandQueue->createSwapChain(swapChainDesc);
++        androidStartupLog("Swapchain creation returned");
+ 
+         // Before configuring multisampling, make sure the device actually supports it for the formats we'll use. If it doesn't, turn off antialiasing in the configuration.
+         const RenderSampleCounts colorSampleCounts = device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR));
+@@ -344,7 +350,9 @@ namespace RT64 {
+         // Create the shader library.
+         const RenderMultisampling multisampling = RasterShader::generateMultisamplingPattern(userConfig.msaaSampleCount(), device->getCapabilities().sampleLocations);
+         shaderLibrary = std::make_unique<ShaderLibrary>(usesHDR, usesHardwareResolve);
++        androidStartupLog("Common shaders begin");
+         shaderLibrary->setupCommonShaders(renderInterface.get(), device.get());
++        androidStartupLog("Common shaders complete");
+         shaderLibrary->setupMultisamplingShaders(renderInterface.get(), device.get(), multisampling);
+ 
+         // Create the shader caches.
+@@ -353,7 +361,9 @@ namespace RT64 {
+         const uint32_t rasterShaderThreads = std::max(threadsAvailable / 2U, 1U);
+         const uint32_t ubershaderThreads = uint32_t(std::max(int(threadsAvailable) - 2, 1));
+         rasterShaderCache = std::make_unique<RasterShaderCache>(rasterShaderThreads, ubershaderThreads);
++        androidStartupLog("Raster shader cache begin");
+         rasterShaderCache->setup(device.get(), renderInterface->getCapabilities().shaderFormat, shaderLibrary.get(), multisampling);
++        androidStartupLog("Raster shader cache configured (async pipelines may still compile)");
+ 
+ #   if RT_ENABLED
+         if (device->getCapabilities().raytracing) {
+@@ -363,7 +373,9 @@ namespace RT64 {
+ 
+         // Create the texture cache.
+         const uint32_t textureCacheThreads = std::max(threadsAvailable / 4U, 1U);
++        androidStartupLog("Texture cache begin");
+         textureCache = std::make_unique<TextureCache>(textureDirectWorker.get(), textureCopyWorker.get(), textureCacheThreads, shaderLibrary.get());
++        androidStartupLog("Texture cache ready");
+ 
+         // Compute the approximate pool for texture replacements from the dedicated video memory.
+         const uint64_t MinimumTexturePoolSize = 512 * 1024 * 1024;
+@@ -411,7 +423,9 @@ namespace RT64 {
+         workloadExt.rtShaderCache = rtShaderCache.get();
+         workloadExt.blueNoiseTexture = blueNoiseTexture.texture.get();
+ #   endif
++        androidStartupLog("Workload queue begin");
+         workloadQueue->setup(workloadExt);
++        androidStartupLog("Workload queue ready");
+ 
+         PresentQueue::External presentExt;
+         presentExt.appWindow = appWindow.get();
+@@ -422,7 +436,9 @@ namespace RT64 {
+         presentExt.sharedResources = sharedQueueResources.get();
+         presentExt.shaderLibrary = shaderLibrary.get();
+         presentExt.createdGraphicsAPI = chosenGraphicsAPI;
++        androidStartupLog("Present queue begin");
+         presentQueue->setup(presentExt);
++        androidStartupLog("Present queue ready");
+ 
+         // Configure the state to use all the created components.
+         State::External stateExt;
+@@ -454,6 +470,7 @@ namespace RT64 {
+ 
+         // Set up the RDP
+         state->rdp->setGBI();
++        androidStartupLog("Application setup complete");
+ 
+         return SetupResult::Success;
+     }
+@@ -540,7 +557,9 @@ namespace RT64 {
+         shaderLibrary->setupMultisamplingShaders(renderInterface.get(), device.get(), multisampling);
+ 
+         // Set up shader cache again with new ubershaders.
++        androidStartupLog("Raster shader cache begin");
+         rasterShaderCache->setup(device.get(), renderInterface->getCapabilities().shaderFormat, shaderLibrary.get(), multisampling);
++        androidStartupLog("Raster shader cache configured (async pipelines may still compile)");
+ 
+         // Destroy the render target managers for both the state and the queues and configure them with the new multisampling.
+         // This also implies the destruction of the contents of the framebuffer managers too.
+diff --git a/src/common/rt64_android_diagnostics.h b/src/common/rt64_android_diagnostics.h
+new file mode 100644
+index 0000000..bee3def
+--- /dev/null
++++ b/src/common/rt64_android_diagnostics.h
+@@ -0,0 +1,18 @@
++#pragma once
++// Startup-only diagnostics: stderr is captured in the app-private Android log.
++#ifdef __ANDROID__
++#include <cstdio>
++#include <ctime>
++#include <unistd.h>
++namespace RT64 {
++inline void androidStartupLog(const char* stage) {
++    timespec now{};
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    std::fprintf(stderr, "[RT64 startup] %lldms tid=%d: %s\n",
++        static_cast<long long>(now.tv_sec) * 1000 + now.tv_nsec / 1000000,
++        static_cast<int>(gettid()), stage);
++}
++}
++#else
++namespace RT64 { inline void androidStartupLog(const char*) {} }
++#endif
