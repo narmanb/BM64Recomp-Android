@@ -24,6 +24,9 @@
 #include "concurrentqueue.h"
 
 static RT64::UserConfiguration::Antialiasing device_max_msaa = RT64::UserConfiguration::Antialiasing::None;
+#ifdef __ANDROID__
+static uint32_t device_msaa_counts = 1;
+#endif
 static bool sample_positions_supported = false;
 static bool high_precision_fb_enabled = false;
 
@@ -332,14 +335,26 @@ zelda64::renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::rendere
     // Check if the selected device actually supports MSAA sample positions and MSAA for for the formats that will be used
     // and downgrade the configuration accordingly.
     if (app->device->getCapabilities().sampleLocations) {
+#ifdef __ANDROID__
+        // High precision uses RGBA16, whose MSAA support can differ from RGBA8.
+        plume::RenderSampleCounts color_sample_counts = app->device->getSampleCountsSupported(RT64::RenderTarget::colorBufferFormat(app->shaderLibrary->usesHDR));
+        plume::RenderSampleCounts depth_sample_counts = app->device->getSampleCountsSupported(RT64::RenderTarget::depthBufferFormat());
+#else
         plume::RenderSampleCounts color_sample_counts = app->device->getSampleCountsSupported(plume::RenderFormat::R8G8B8A8_UNORM);
         plume::RenderSampleCounts depth_sample_counts = app->device->getSampleCountsSupported(plume::RenderFormat::D32_FLOAT);
+#endif
         plume::RenderSampleCounts common_sample_counts = color_sample_counts & depth_sample_counts;
+#ifdef __ANDROID__
+        device_msaa_counts = common_sample_counts;
+#endif
         device_max_msaa = compute_max_supported_aa(common_sample_counts);
         sample_positions_supported = true;
     }
     else {
         device_max_msaa = RT64::UserConfiguration::Antialiasing::None;
+#ifdef __ANDROID__
+        device_msaa_counts = 1;
+#endif
         sample_positions_supported = false;
     }
 
@@ -493,6 +508,12 @@ void zelda64::renderer::RT64Context::check_texture_pack_actions() {
 RT64::UserConfiguration::Antialiasing zelda64::renderer::RT64MaxMSAA() {
     return device_max_msaa;
 }
+
+#ifdef __ANDROID__
+uint32_t zelda64::renderer::RT64MSAACounts() {
+    return device_msaa_counts;
+}
+#endif
 
 std::unique_ptr<ultramodern::renderer::RendererContext> zelda64::renderer::create_render_context(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
     return std::make_unique<zelda64::renderer::RT64Context>(rdram, window_handle, developer_mode);

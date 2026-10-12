@@ -43,6 +43,9 @@ namespace zelda64 {
         std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(uint8_t *rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
 
         RT64::UserConfiguration::Antialiasing RT64MaxMSAA();
+#ifdef __ANDROID__
+        uint32_t RT64MSAACounts();
+#endif
         bool RT64SamplePositionsSupported();
         bool RT64HighPrecisionFBEnabled();
 

@@ -1314,7 +1314,7 @@ index f5beee9..63b7dc4 100644
  #endif
 \ No newline at end of file
 diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
-index 785de27..1c5322a 100644
+index 785de27..4e84d44 100644
 --- a/src/hle/rt64_application.cpp
 +++ b/src/hle/rt64_application.cpp
 @@ -3,6 +3,7 @@
@@ -1325,7 +1325,18 @@ index 785de27..1c5322a 100644
  #include "rhi/rt64_render_hooks.h"
  
  #include <cinttypes>
-@@ -297,9 +298,12 @@ namespace RT64 {
+@@ -294,12 +295,23 @@ namespace RT64 {
+             break;
+         }
+ 
++#if defined(__ANDROID__)
++        if (usesHDR && !device->getCapabilities().highPrecisionColorSupported) {
++            fprintf(stderr, "[rt64] High precision color format unsupported; using standard precision.\n");
++            usesHDR = false;
++            userConfig.internalColorFormat = UserConfiguration::InternalColorFormat::Standard;
++        }
++#endif
++
          // Call the init hook if one was attached.
          RenderHookInit *initHook = GetRenderHookInit();
          if (initHook != nullptr) {
@@ -1338,7 +1349,7 @@ index 785de27..1c5322a 100644
          // Create all the render workers.
          drawDataUploader = std::make_unique<BufferUploader>(device.get());
          transformsUploader = std::make_unique<BufferUploader>(device.get());
-@@ -316,7 +320,7 @@ namespace RT64 {
+@@ -316,7 +328,7 @@ namespace RT64 {
          // Create the swap chain with the texture count specified from the configuration.
          RenderSwapChainDesc swapChainDesc;
          swapChainDesc.renderWindow = appWindow->windowHandle;
@@ -1347,7 +1358,7 @@ index 785de27..1c5322a 100644
          swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
  
          // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
-@@ -331,7 +335,9 @@ namespace RT64 {
+@@ -331,7 +343,9 @@ namespace RT64 {
              swapChainDesc.enablePresentWait = true;
          }
  
@@ -1357,7 +1368,7 @@ index 785de27..1c5322a 100644
  
          // Before configuring multisampling, make sure the device actually supports it for the formats we'll use. If it doesn't, turn off antialiasing in the configuration.
          const RenderSampleCounts colorSampleCounts = device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR));
-@@ -344,7 +350,9 @@ namespace RT64 {
+@@ -344,7 +358,9 @@ namespace RT64 {
          // Create the shader library.
          const RenderMultisampling multisampling = RasterShader::generateMultisamplingPattern(userConfig.msaaSampleCount(), device->getCapabilities().sampleLocations);
          shaderLibrary = std::make_unique<ShaderLibrary>(usesHDR, usesHardwareResolve);
@@ -1367,7 +1378,7 @@ index 785de27..1c5322a 100644
          shaderLibrary->setupMultisamplingShaders(renderInterface.get(), device.get(), multisampling);
  
          // Create the shader caches.
-@@ -353,7 +361,9 @@ namespace RT64 {
+@@ -353,7 +369,9 @@ namespace RT64 {
          const uint32_t rasterShaderThreads = std::max(threadsAvailable / 2U, 1U);
          const uint32_t ubershaderThreads = uint32_t(std::max(int(threadsAvailable) - 2, 1));
          rasterShaderCache = std::make_unique<RasterShaderCache>(rasterShaderThreads, ubershaderThreads);
@@ -1377,7 +1388,7 @@ index 785de27..1c5322a 100644
  
  #   if RT_ENABLED
          if (device->getCapabilities().raytracing) {
-@@ -363,7 +373,9 @@ namespace RT64 {
+@@ -363,7 +381,9 @@ namespace RT64 {
  
          // Create the texture cache.
          const uint32_t textureCacheThreads = std::max(threadsAvailable / 4U, 1U);
@@ -1387,7 +1398,7 @@ index 785de27..1c5322a 100644
  
          // Compute the approximate pool for texture replacements from the dedicated video memory.
          const uint64_t MinimumTexturePoolSize = 512 * 1024 * 1024;
-@@ -411,7 +423,9 @@ namespace RT64 {
+@@ -411,7 +431,9 @@ namespace RT64 {
          workloadExt.rtShaderCache = rtShaderCache.get();
          workloadExt.blueNoiseTexture = blueNoiseTexture.texture.get();
  #   endif
@@ -1397,7 +1408,7 @@ index 785de27..1c5322a 100644
  
          PresentQueue::External presentExt;
          presentExt.appWindow = appWindow.get();
-@@ -422,7 +436,9 @@ namespace RT64 {
+@@ -422,7 +444,9 @@ namespace RT64 {
          presentExt.sharedResources = sharedQueueResources.get();
          presentExt.shaderLibrary = shaderLibrary.get();
          presentExt.createdGraphicsAPI = chosenGraphicsAPI;
@@ -1407,7 +1418,7 @@ index 785de27..1c5322a 100644
  
          // Configure the state to use all the created components.
          State::External stateExt;
-@@ -454,6 +470,7 @@ namespace RT64 {
+@@ -454,6 +478,7 @@ namespace RT64 {
  
          // Set up the RDP
          state->rdp->setGBI();
@@ -1415,7 +1426,7 @@ index 785de27..1c5322a 100644
  
          return SetupResult::Success;
      }
-@@ -540,7 +557,9 @@ namespace RT64 {
+@@ -540,7 +565,9 @@ namespace RT64 {
          shaderLibrary->setupMultisamplingShaders(renderInterface.get(), device.get(), multisampling);
  
          // Set up shader cache again with new ubershaders.

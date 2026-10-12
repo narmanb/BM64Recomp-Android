@@ -24,7 +24,7 @@ if [[ -f "$sdl_headers/SDL.h" ]]; then
     for platform in android desktop; do
         platform_flags=(-DPLUME_SDL_VULKAN_ENABLED)
         [[ "$platform" == android ]] && platform_flags=(-D__ANDROID__)
-        for test in test_render_formats test_android_queues; do
+        for test in test_render_formats test_android_queues test_msaa_formats test_vulkan_sample_counts test_color_precision; do
             "${CXX:-c++}" -std=c++20 "${platform_flags[@]}" -I"$build" -I"$sdl_headers" \
                 -Ilib/rt64/src/contrib/plume -Ilib/rt64/src/contrib/plume/contrib/Vulkan-Headers/include \
                 "tests/$test.cpp" -o "$build/$test-$platform"

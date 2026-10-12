@@ -1186,9 +1186,17 @@ void zelda64::set_debug_mode_enabled(bool enabled) {
 }
 
 void recompui::update_supported_options() {
+#ifdef __ANDROID__
+    // Custom sample-location support need not include every lower sample count.
+    const uint32_t counts = zelda64::renderer::RT64MSAACounts();
+    msaa2x_supported = (counts & 2) != 0;
+    msaa4x_supported = (counts & 4) != 0;
+    msaa8x_supported = (counts & 8) != 0;
+#else
     msaa2x_supported = zelda64::renderer::RT64MaxMSAA() >= RT64::UserConfiguration::Antialiasing::MSAA2X;
     msaa4x_supported = zelda64::renderer::RT64MaxMSAA() >= RT64::UserConfiguration::Antialiasing::MSAA4X;
     msaa8x_supported = zelda64::renderer::RT64MaxMSAA() >= RT64::UserConfiguration::Antialiasing::MSAA8X;
+#endif
     sample_positions_supported = zelda64::renderer::RT64SamplePositionsSupported();
     
     new_options = ultramodern::renderer::get_graphics_config();

@@ -28,3 +28,41 @@ end = vulkan.index('        // Create the struct to store the virtual queues.', 
 start = vulkan.index('    void VulkanCommandQueue::executeCommandLists(')
 end = vulkan.index('    // VulkanPool', start)
 (out / 'vulkan_failure_methods.inc').write_text(vulkan[start:end])
+
+context = Path('src/main/rt64_render_context.cpp').read_text()
+start = context.index('RT64::UserConfiguration::Antialiasing compute_max_supported_aa(')
+end = context.index('\n}\n', start) + 3
+(out / 'max_supported_aa.inc').write_text(context[start:end])
+start = context.index('    if (app->device->getCapabilities().sampleLocations)')
+end = context.index('    high_precision_fb_enabled = ', start)
+(out / 'msaa_capability_selection.inc').write_text(context[start:end])
+accessors = []
+for declaration in ['RT64::UserConfiguration::Antialiasing zelda64::renderer::RT64MaxMSAA()', 'uint32_t zelda64::renderer::RT64MSAACounts()']:
+    start = context.index(declaration)
+    end = context.index('\n}\n', start) + 3
+    accessors.append(context[start:end])
+(out / 'msaa_capability_accessors.inc').write_text('\n'.join(accessors))
+ui_config = Path('src/ui/ui_config.cpp').read_text()
+start = ui_config.index('void recompui::update_supported_options() {') + len('void recompui::update_supported_options() {')
+end = ui_config.index('    sample_positions_supported = ', start)
+(out / 'msaa_ui_flags.inc').write_text(ui_config[start:end])
+target = Path('lib/rt64/src/render/rt64_render_target.cpp').read_text()
+formats = []
+for name in ['colorBufferFormat', 'depthBufferFormat']:
+    start = target.index('    RenderFormat RenderTarget::' + name + '(')
+    end = target.index('\n    }', start) + 6
+    formats.append(target[start:end])
+(out / 'render_target_formats.inc').write_text('\n'.join(formats))
+start = vulkan.index('    VkFormat toVk(RenderFormat format)')
+end = vulkan.index('\n    }', start) + 6
+(out / 'vulkan_format_conversion.inc').write_text(vulkan[start:end])
+start = vulkan.index('    RenderSampleCounts VulkanDevice::getSampleCountsSupported(')
+end = vulkan.index('\n    }', start) + 6
+(out / 'vulkan_sample_counts.inc').write_text(vulkan[start:end])
+start = app.index('        bool usesHDR;')
+end = app.index('        // Call the init hook', start)
+(out / 'color_precision_selection.inc').write_text(app[start:end])
+start = vulkan.index('    static bool supportsHighPrecisionColor(VkPhysicalDevice physicalDevice, bool storageExtendedFormats) {')
+end = vulkan.index('\n    }', start) + 6
+(out / 'high_precision_support.inc').write_text(vulkan[start:end])
+(out / 'high_precision_capability.inc').write_text(next(l for l in vulkan.splitlines() if 'capabilities.highPrecisionColorSupported =' in l))
