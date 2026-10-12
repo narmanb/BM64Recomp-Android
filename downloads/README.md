@@ -1,44 +1,50 @@
-# Native Android test APK — Android.6
+# Native Android test APK — Android.7
 
 [Download BM64-Android-debug.apk](https://raw.githubusercontent.com/narmanb/BM64Recomp-Android/android-port/downloads/BM64-Android-debug.apk)
 
-Package `com.narmanb.bm64`, version `1.0.0-android.6`, arm64-v8a, Android API28+.
-Size: 36,991,679 bytes. No ROM bundled. Install over earlier full builds to retain
+Package `com.narmanb.bm64`, version `1.0.0-android.7`, arm64-v8a, Android API28+.
+Size: 37,008,355 bytes. No ROM bundled. Install over earlier full builds to retain
 ROM/settings; the signing certificate and package match.
 
-Launcher **Graphics Settings** now includes:
+Launcher **Graphics Settings** and native **Settings → Graphics → Resolution**
+now offer higher direct RT64 rendering scales:
 
-- Supersampling / downsampling: Off, 2x, 4x (for 1x/2x resolution).
-- MS anti-aliasing: Off, 2x, 4x, 8x, subject to actual GPU support.
-- Framebuffer color precision: Automatic, Standard, High. Changes internal color
-  precision, not display HDR. Unsupported High falls back to Standard at startup.
-- HUD placement: Original, 16:9, Expand to screen edges.
+| Scale | Approximate height at the usual 240-line game output |
+| --- | --- |
+| 1x | 240p |
+| 2x (default) | 480p |
+| 3x | 720p |
+| 4x | 960p |
+| 6x | 1440p |
+| Auto / Match screen | Scales to the output window |
 
-Existing resolution, aspect ratio and rendering frame-rate choices remain.
-Defaults stay unchanged. For a sharper image try Match window resolution first;
-for supersampling try 2x resolution with 2x downsampling. Higher settings can
-reduce performance. Precision applies on the next game launch. Gameplay timing
-is unchanged.
+Start with 3x or 4x, then try 6x if sustained performance stays acceptable. Dimensions
+vary with the game's framebuffer and aspect ratio. Original texture/sprite detail
+remains limited by the original assets. Defaults and gameplay timing are unchanged.
 
-Android Vulkan checks required high-precision format features and sampled/color/
-storage image usages before selecting it. MSAA checks intersect image/global
-limits and custom sample-location support. The native menu enables exact supported
-counts, including sparse 4x-only masks. Desktop behavior is preserved.
+Higher scales and Auto disable supersampling rather than stacking more GPU memory
+use. Saved supersampling preferences return when selecting 1x/2x again, including
+native RmlUi programmatic Change events. Native controller navigation skips disabled
+controls; compact Android resolution labels keep the row short. Desktop choices
+remain unchanged through a revision-pinned, Android-only runtime adaptation.
 
-The user reports the prior installation working. New quality modes still require
-visual/performance testing on RP5 and S25+; no measured FPS claim is made.
-Immersive fullscreen, customizable touch controls, saved visibility/opacity,
-independent physical input and complete raw diagnostic export remain available.
+Android.6 quality controls remain: supersampling for 1x/2x, capability-checked MSAA,
+Automatic/Standard/High internal color precision and HUD placement. Immersive
+fullscreen, customizable touch visibility/opacity, independent physical input and
+complete diagnostic export remain available.
 
-Full native Gradle build and host regressions passed, including unsupported color
-precision fallback, actual Vulkan image support decisions and sparse MSAA choices.
-The optional uploaded-ROM acceptance test is skipped in this resumed environment;
-previous real-ROM acceptance results remain documented. APK v2 signature, matching
-update certificate, JNI/settings bridge, ARM64 and 16 KiB alignment/ROM exclusion
-checks passed. Independent final review found no remaining important issues.
+Full native Gradle build and host regression suite passed. Tests run actual renderer
+selection, JSON round trips and settings bindings, including saved supersampling
+across mode transitions and unchanged desktop policy. APK v2 signature, matching
+update certificate, JNI, ARM64/16 KiB alignment and ROM exclusion checks passed.
+New choices are packaged in launcher DEX, native library and in-game assets.
+Independent final review found no remaining important issues. New resolution modes
+still need visual/performance testing on RP5/S25+; no measured FPS claim is made.
+The optional absent uploaded-ROM test is skipped this time; earlier real-ROM
+acceptance results remain documented.
 
-SHA-256: `eb9543cafd276f0bab3f42cf1c0f68c8fab9523c6c162c963c7e37708c8a3195`.
+SHA-256: `39bdba6faeb693fcdc7fd900677a4675d6ecba8e11308112720d493b662cb8f3`.
 
 Source/status/instructions: [ANDROID_PORT.md](../docs/ANDROID_PORT.md).
-APK built from source commit `bb845bc`. Hosted here because cloud release asset
+APK built from source commit `8a11fc1`. Hosted here because cloud release asset
 uploads are unavailable; later builds can move to GitHub Releases.
