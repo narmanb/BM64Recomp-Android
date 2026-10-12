@@ -8,13 +8,13 @@ not an emulator. No ROM, extracted assets or generated game binary is committed.
 ## Current status
 
 The **full native ARM64 debug APK now builds** directly in this cloud environment
-(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.3`, minimum API28.
+(updated 2026-10-12). Package `com.narmanb.bm64`, version `1.0.0-android.4`, minimum API28.
 The game/RSP/patch code is generated and linked into `libBM64.so`; Vulkan/RT64,
 SDL2 and the Android launcher/control system are packaged. Start is enabled after
 importing a compatible retail ROM. The ROM is **not bundled**.
 
-APK SHA-256: `b6caa3753363c38146591613e2f8b5aef4ce4465a932029b59110e9804d260d5`.
-This is a diagnostic full build for the reported black screen, **not verified playable/stable**.
+APK SHA-256: `ad4a0868456b8925830a730e4d33a2ac318ead888f4d4573a7fc29b3f071784c`.
+This is a Vulkan contract/error-handling test build, **not verified playable/stable**.
 No Android device is attached here. The separate ROM-free foundation APK remains
 available for launcher/settings/control-preview testing, with Start disabled.
 
@@ -120,6 +120,62 @@ do not tap Start again before copying because that clears the attempt's log.
 Do not replace the driver or change several graphics settings during this capture.
 The report will determine whether initialization, shader linking, UI rendering,
 GPU work, swapchain presentation or a later step needs correction.
+
+## Android.3 device report comparison and Android.4 corrections
+
+On 2026-10-12 the user supplied both copied text and a diagnostic ZIP from the
+Galaxy S25+ running Android.3. They agree on startup checkpoints: RT64 setup,
+renderer-ready, first screen update and first UI layout/geometry/composition all
+completed. The ZIP contains a 67,700-byte `crash-report.txt` and a 421,195-byte
+**historical** tombstone from Android.1 on October11. It does not contain the raw
+current native log. Its included native log is exactly the last 65,536 bytes,
+starting in the middle of an error; it contains 578 `vkQueueSubmit` device-lost
+errors (`0xFFFFFFFC`, `VK_ERROR_DEVICE_LOST`), 579 fence timeouts (`0x2`), 207 later
+swapchain native-window-in-use errors, one surface-lost error and a later surface
+recreation. Some later entries are absent from the pasted portion. The older
+SIGSEGV trace is not evidence of a current Android.3 crash. The first error and
+initial shader/device/presentation diagnostics are missing from **both** previews.
+
+The exporter reused the bounded copy text for the ZIP. Android.4 corrects this:
+Copy now retains the first 48 KiB and last16 KiB of large native logs and clearly
+marks omitted bytes; Save streams complete raw allowlisted diagnostics and graphics
+configuration to separate ZIP entries. ROM and asset directories are excluded.
+Each streamed file has a fixed initial length, so export does not chase a live log
+forever. A large-error-log regression verifies preserved first/latest errors and
+byte-for-byte complete ZIP data. Existing Android.3 logs remain in app-private
+storage when installing this update; they can be exported before a new Start.
+
+Source review also identified Vulkan contract defects that Android.4 corrects:
+
+- The Android format helper already returns RGBA for RT64's final VI pipelines,
+  but the application swapchain and frontend UI still requested BGRA. Both now
+  use `GetSwapChainFormat()`, including UI sample-capability queries and offscreen
+  textures. This matches the compatible Goemon implementation. Android and desktop
+  regressions compile the real production decisions and check consistency; desktop
+  still uses BGRA. Launcher VI registers are initially blank, so this mismatch is
+  **not proof** of the first menu-frame device loss.
+- Plume created EXCLUSIVE resources shared by RT64/UI while independently selecting
+  DIRECT, COMPUTE and COPY families, with no family ownership transfers. On Android,
+  all three now use the graphics/compute/transfer-capable family; virtual queues and
+  existing synchronization remain. Offered/selected families are logged. Synthetic
+  dedicated-transfer/compute and single-family cases validate the real selection
+  code; the desktop policy is retained. The S25+'s original families were absent
+  from the truncated log, so this is not a measured diagnosis of that device.
+- Failed submits and fence waits previously returned void and let frame generation
+  continue, producing the observed error storm and misleading subsequent stages.
+  Android now saves the first fatal GPU error and exits only the isolated game
+  process, without attempting GPU cleanup waits. Required shader/pipeline/layout/
+  renderpass/descriptor creation failures follow the same policy rather than leaving
+  null required objects for later draws. The launcher displays Graphics stopped.
+  A subprocess regression runs the actual submit/fence methods with injected Vulkan
+  results: loss/timeout stops execution, success still waits/resets correctly.
+
+**The first S25+ GPU-loss trigger is not established by the supplied truncated
+report. Android.4 fixes confirmed source/reporting defects and requires physical
+retesting; it is not a verified playable or stable release.** No driver replacement,
+game simulation/timing change, controller/touch behavior change or measured FPS
+result is involved. Further GPU failure should return to the launcher with a
+complete startup report rather than continue indefinitely at a black screen.
 
 ## Audited references and dependency pins
 
@@ -269,10 +325,11 @@ adb install -r /path/to/BM64-Android-debug.apk
 
 ## Known issues / next steps
 
-1. Capture the S25+ black-screen startup report with Android.3 diagnostics.
-   Android.2 reportedly survives launch but stays black. Identify the actual blocked
-   stage before making further renderer changes. Successful initialization, visible
-   rendering and gameplay remain unverified; graphics scrolling needs confirmation.
+1. Retest Android.4 on the S25+. If graphics stops or stays black, export the ZIP
+   with complete raw diagnostics and identify the first error. Android.3 initialized
+   and recorded a UI frame, then lost the GPU device; its exported previews omitted
+   the initial error. Visible rendering/gameplay and graphics scrolling need device
+   confirmation. Measure performance only once gameplay is working.
 2. Sideload on RP5 and S25+. Test import, Start, title screen, level entry, analog partial
    movement, all button functions, simultaneous input, menus and Bluetooth/USB reconnect.
 3. Verify SRAM/EEPROM/controller-pak saves across activity termination and app restart;
@@ -345,3 +402,13 @@ adb install -r /path/to/BM64-Android-debug.apk
   Existing ROM/input/touch tests pass. Instrumentation changes no graphics settings,
   driver selection, synchronization or simulation timing. Device log capture is
   required before identifying the black-screen root cause.
+
+- Android.4 full native Gradle build and required APK checks succeeded. Host
+  production-body regressions verify Android/desktop format consistency and queue
+  selection, fatal submission/wait behavior in isolated subprocesses, full diagnostic
+  ZIP content and prefix/suffix copy previews. Existing real-ROM import and input/touch
+  checks pass. Independent review found no blocking issues. Final packaging is rebuilt
+  fresh to avoid holes retained by AGP's incremental ZIP updater after a native library
+  replacement. The fresh APK is 36,975,043 bytes; signature/ABI/JNI/16 KiB/ROM exclusion checks
+  passed again on this exact package. The same update signing certificate is retained.
+  Device retest pending.

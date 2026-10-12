@@ -17,6 +17,20 @@ if [[ ! -f "$sdl_headers/SDL.h" ]]; then
     sdl_headers=$(dirname "${sdl_headers:-/missing/SDL.h}")
 fi
 if [[ -f "$sdl_headers/SDL.h" ]]; then
+    python3 tests/extract_renderer_tests.py "$build"
+    "${CXX:-c++}" -std=c++20 -D__ANDROID__ -I"$build" -Ilib/rt64/src/contrib/plume \
+        -Ilib/rt64/src/contrib/plume/contrib/Vulkan-Headers/include tests/test_vulkan_failure.cpp -o "$build/vulkan-failure"
+    "$build/vulkan-failure"
+    for platform in android desktop; do
+        platform_flags=(-DPLUME_SDL_VULKAN_ENABLED)
+        [[ "$platform" == android ]] && platform_flags=(-D__ANDROID__)
+        for test in test_render_formats test_android_queues; do
+            "${CXX:-c++}" -std=c++20 "${platform_flags[@]}" -I"$build" -I"$sdl_headers" \
+                -Ilib/rt64/src/contrib/plume -Ilib/rt64/src/contrib/plume/contrib/Vulkan-Headers/include \
+                "tests/$test.cpp" -o "$build/$test-$platform"
+            "$build/$test-$platform"
+        done
+    done
     python3 - "$build/window_factory.inc" <<'WINDOW_CODE'
 from pathlib import Path
 import sys
@@ -51,7 +65,8 @@ else
     echo "Menu event test skipped: run the Android dependency configure to fetch pinned SDL headers."
 fi
 java_src=android/app/src/main/java/com/narmanb/bm64
-javac -d "$build/classes" "$java_src"/touch/{TouchControl,TouchLayout,TouchPad,TouchVisibility,TouchStore}.java "$java_src/RomImporter.java" tests/{TouchHarness,TouchStoreHarness,RomImporterHarness}.java
+javac -d "$build/classes" "$java_src"/touch/{TouchControl,TouchLayout,TouchPad,TouchVisibility,TouchStore}.java "$java_src/RomImporter.java" "$java_src/DiagnosticFiles.java" tests/{TouchHarness,TouchStoreHarness,RomImporterHarness,DiagnosticFilesHarness}.java
+java -cp "$build/classes" com.narmanb.bm64.DiagnosticFilesHarness
 java -cp "$build/classes" TouchHarness
 java -cp "$build/classes" TouchStoreHarness
 if [[ -n "${BM64_TEST_ROM:-}" ]]; then

@@ -85,6 +85,8 @@ public final class LauncherActivity extends Activity {
         boolean rom = new File(data, "bm64_us.z64").length() == 8 * 1024 * 1024;
         status.setText(!BuildConfig.PLAYABLE ? "Foundation build: ROM import, controller test and touchscreen settings. Gameplay requires ROM-generated native sources." : busy ? "Working…" : rom ? "USA ROM imported. Ready to start." :
             "Select your Bomberman 64 USA ROM first. No ROM is bundled.\nIf Start crashes, reopen this app and save the crash report.");
+        if (new File(data, "graphics-failure.txt").isFile())
+            status.append("\nGraphics stopped. Copy or save the crash report for details.");
         start.setEnabled(rom && !busy && BuildConfig.PLAYABLE); pick.setEnabled(!busy);
     }
     @Override protected void onResume() {
@@ -149,6 +151,7 @@ public final class LauncherActivity extends Activity {
                     if (out == null) throw new IOException("Cannot create report");
                     try (ZipOutputStream zip = new ZipOutputStream(out)) {
                         zip.putNextEntry(new ZipEntry("crash-report.txt")); zip.write(snapshot.getBytes(StandardCharsets.UTF_8)); zip.closeEntry();
+                        new DiagnosticFiles(data).appendToArchive(zip);
                         if (captured != null) { zip.putNextEntry(new ZipEntry(name)); zip.write(captured); zip.closeEntry(); }
                     }
                     postIfAlive(() -> Toast.makeText(this, "Crash report saved", Toast.LENGTH_LONG).show());

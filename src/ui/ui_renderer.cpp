@@ -103,7 +103,7 @@ class RmlRenderInterface_RT64_impl : public Rml::RenderInterfaceCompatibility {
     static constexpr uint32_t initial_index_buffer_size = 1024 * sizeof(int);
     static constexpr plume::RenderFormat RmlTextureFormat = plume::RenderFormat::R8G8B8A8_UNORM;
     static constexpr plume::RenderFormat RmlTextureFormatBgra = plume::RenderFormat::B8G8R8A8_UNORM;
-    static constexpr plume::RenderFormat SwapChainFormat = plume::RenderFormat::B8G8R8A8_UNORM;
+    static plume::RenderFormat SwapChainFormat() { return RT64::GetSwapChainFormat(); }
     static constexpr uint32_t RmlTextureFormatBytesPerPixel = RenderFormatSize(RmlTextureFormat);
     static_assert(RenderFormatSize(RmlTextureFormatBgra) == RmlTextureFormatBytesPerPixel);
     plume::RenderInterface* interface_;
@@ -157,7 +157,7 @@ public:
 
         // Enable 4X MSAA if supported by the device.
         const plume::RenderSampleCounts desired_sample_count = plume::RenderSampleCount::COUNT_8;
-        if (device_->getSampleCountsSupported(SwapChainFormat) & desired_sample_count) {
+        if (device_->getSampleCountsSupported(SwapChainFormat()) & desired_sample_count) {
             multisampling_.sampleCount = desired_sample_count;
         }
 
@@ -235,7 +235,7 @@ public:
             .dstBlendAlpha = plume::RenderBlend::INV_SRC_ALPHA,
             .blendOpAlpha = plume::RenderBlendOperation::ADD,
         };
-        pipeline_desc.renderTargetFormat[0] = SwapChainFormat; // TODO: Use whatever format the swap chain was created with.
+        pipeline_desc.renderTargetFormat[0] = SwapChainFormat(); // TODO: Use whatever format the swap chain was created with.
         pipeline_desc.renderTargetCount = 1;
         pipeline_desc.cullMode = plume::RenderCullMode::NONE;
         pipeline_desc.inputSlots = &vertex_slot_;
@@ -581,8 +581,8 @@ public:
         if (multisampling_.sampleCount > 1) {
             if (window_width_ != image_width || window_height_ != image_height) {
                 screen_framebuffer_.reset();
-                screen_texture_ = device_->createTexture(plume::RenderTextureDesc::ColorTarget(image_width, image_height, SwapChainFormat));
-                screen_texture_ms_ = device_->createTexture(plume::RenderTextureDesc::ColorTarget(image_width, image_height, SwapChainFormat, multisampling_));
+                screen_texture_ = device_->createTexture(plume::RenderTextureDesc::ColorTarget(image_width, image_height, SwapChainFormat()));
+                screen_texture_ms_ = device_->createTexture(plume::RenderTextureDesc::ColorTarget(image_width, image_height, SwapChainFormat(), multisampling_));
                 const plume::RenderTexture *color_attachment = screen_texture_ms_.get();
                 screen_framebuffer_ = device_->createFramebuffer(plume::RenderFramebufferDesc(&color_attachment, 1));
                 screen_descriptor_set_->setTexture(0, screen_texture_.get(), plume::RenderTextureLayout::SHADER_READ);

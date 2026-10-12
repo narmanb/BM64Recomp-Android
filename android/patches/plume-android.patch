@@ -53,18 +53,49 @@ index 9dcfedf..c5183d3 100644
          bool uma = false;
  
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index 2800022..caadf00 100644
+index 2800022..9b85c10 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,8 @@
  #define VOLK_IMPLEMENTATION 
  
  #include "plume_vulkan.h"
 +#include "plume_android_surface.h"
++#include "plume_android_failure.h"
  
  #include <algorithm>
  #include <cmath>
-@@ -1390,9 +1391,20 @@ namespace plume {
+@@ -1211,6 +1213,9 @@ namespace plume {
+         VkResult res = vkCreateDescriptorSetLayout(device->vk, &setLayoutInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateDescriptorSetLayout failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateDescriptorSetLayout", res);
++#endif
+             return;
+         }
+     }
+@@ -1266,6 +1271,9 @@ namespace plume {
+         VkResult res = vkCreatePipelineLayout(device->vk, &layoutInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreatePipelineLayout failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreatePipelineLayout", res);
++#endif
+             return;
+         }
+     }
+@@ -1300,6 +1308,9 @@ namespace plume {
+         VkResult res = vkCreateShaderModule(device->vk, &shaderInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateShaderModule failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateShaderModule", res);
++#endif
+             return;
+         }
+     }
+@@ -1390,9 +1401,23 @@ namespace plume {
          pipelineInfo.layout = pipelineLayout->vk;
          pipelineInfo.stage = stageInfo;
  
@@ -83,10 +114,33 @@ index 2800022..caadf00 100644
 +                "The driver rejected this shader; it will not be bound. See plume_vulkan.cpp.\n",
 +                pipelineIndex, res, computeShader->entryPointName.c_str(), desc.threadGroupSizeX, desc.threadGroupSizeY, desc.threadGroupSizeZ);
 +            vk = VK_NULL_HANDLE;
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateComputePipelines", res);
++#endif
              return;
          }
      }
-@@ -1931,7 +1943,17 @@ namespace plume {
+@@ -1652,6 +1677,9 @@ namespace plume {
+         VkResult res = vkCreateGraphicsPipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateGraphicsPipelines failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateGraphicsPipelines", res);
++#endif
+             return;
+         }
+     }
+@@ -1736,6 +1764,9 @@ namespace plume {
+         }
+         else {
+             fprintf(stderr, "vkCreateRenderPass failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateRenderPass", res);
++#endif
+             return VK_NULL_HANDLE;
+         }
+     }
+@@ -1931,7 +1962,20 @@ namespace plume {
  
          VkResult res = vkAllocateDescriptorSets(device->vk, &allocateInfo, &vk);
          if (res != VK_SUCCESS) {
@@ -101,11 +155,14 @@ index 2800022..caadf00 100644
 +            for (auto &tc : typeCounts) {
 +                fprintf(stderr, "  descriptorType=%d count=%u\n", (int)tc.first, tc.second);
 +            }
++#ifdef __ANDROID__
++            failAndroidVulkan("vkAllocateDescriptorSets", res);
++#endif
 +            vk = VK_NULL_HANDLE;
              return;
          }
      }
-@@ -2019,6 +2041,13 @@ namespace plume {
+@@ -2019,6 +2063,13 @@ namespace plume {
      }
  
      void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
@@ -119,7 +176,17 @@ index 2800022..caadf00 100644
          assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
  
          const uint32_t indexBase = setLayout->descriptorIndexBases[descriptorIndex];
-@@ -2080,6 +2109,21 @@ namespace plume {
+@@ -2067,6 +2118,9 @@ namespace plume {
+         }
+         else {
+             fprintf(stderr, "vkCreateDescriptorPool failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateDescriptorPool", res);
++#endif
+             return VK_NULL_HANDLE;
+         }
+     }
+@@ -2080,6 +2134,21 @@ namespace plume {
          this->commandQueue = commandQueue;
          this->desc = desc;
  
@@ -141,7 +208,7 @@ index 2800022..caadf00 100644
          VkResult res;
  
  #   ifdef _WIN64
-@@ -2204,6 +2248,13 @@ namespace plume {
+@@ -2204,6 +2273,13 @@ namespace plume {
              }
          }
  
@@ -155,7 +222,7 @@ index 2800022..caadf00 100644
          if (compatibleSurfaceFormats.empty()) {
              fprintf(stderr, "No compatible surface formats were found.\n");
              return;
-@@ -2249,6 +2300,19 @@ namespace plume {
+@@ -2249,6 +2325,19 @@ namespace plume {
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
          }
  
@@ -175,7 +242,7 @@ index 2800022..caadf00 100644
          // Remove tracking from the parent command queue.
          commandQueue->swapChains.erase(this);
      }
-@@ -2310,6 +2374,17 @@ namespace plume {
+@@ -2310,6 +2399,17 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -193,7 +260,7 @@ index 2800022..caadf00 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2395,6 +2470,10 @@ namespace plume {
+@@ -2395,6 +2495,10 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -204,7 +271,7 @@ index 2800022..caadf00 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2436,6 +2515,105 @@ namespace plume {
+@@ -2436,6 +2540,105 @@ namespace plume {
          return desc.renderWindow;
      }
  
@@ -310,7 +377,17 @@ index 2800022..caadf00 100644
      bool VulkanSwapChain::isEmpty() const {
          return (vk == VK_NULL_HANDLE) || (width == 0) || (height == 0);
      }
-@@ -2940,6 +3118,16 @@ namespace plume {
+@@ -2622,6 +2825,9 @@ namespace plume {
+         res = vkCreateRenderPass(device->vk, &passInfo, nullptr, &renderPass);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateRenderPass failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkCreateRenderPass", res);
++#endif
+             return;
+         }
+         
+@@ -2940,6 +3146,16 @@ namespace plume {
          switch (interfacePipeline->type) {
          case VulkanPipeline::Type::Compute: {
              const VulkanComputePipeline *computePipeline = static_cast<const VulkanComputePipeline *>(interfacePipeline);
@@ -327,7 +404,7 @@ index 2800022..caadf00 100644
              vkCmdBindPipeline(vk, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline->vk);
              break;
          }
-@@ -3488,6 +3676,12 @@ namespace plume {
+@@ -3488,6 +3704,12 @@ namespace plume {
          assert(setIndex < pipelineLayout->descriptorSetLayouts.size());
  
          const VulkanDescriptorSet *interfaceSet = static_cast<const VulkanDescriptorSet *>(descriptorSet);
@@ -340,7 +417,27 @@ index 2800022..caadf00 100644
          vkCmdBindDescriptorSets(vk, bindPoint, pipelineLayout->vk, setIndex, 1, &interfaceSet->vk, 0, nullptr);
      }
  
-@@ -3785,6 +3979,19 @@ namespace plume {
+@@ -3621,6 +3843,9 @@ namespace plume {
+ 
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkQueueSubmit failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkQueueSubmit", res, static_cast<uint32_t>(type), familyIndex);
++#endif
+             return;
+         }
+     }
+@@ -3632,6 +3857,9 @@ namespace plume {
+         VkResult res = vkWaitForFences(device->vk, 1, &interfaceFence->vk, VK_TRUE, UINT64_MAX);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
++#ifdef __ANDROID__
++            failAndroidVulkan("vkWaitForFences", res, static_cast<uint32_t>(type), familyIndex);
++#endif
+             return;
+         }
+ 
+@@ -3785,6 +4013,19 @@ namespace plume {
              return;
          }
  
@@ -360,7 +457,7 @@ index 2800022..caadf00 100644
          // Check for extensions.
          uint32_t extensionCount;
          vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
-@@ -3895,6 +4102,16 @@ namespace plume {
+@@ -3895,6 +4136,16 @@ namespace plume {
          deviceFeatures.pNext = featuresChain;
          vkGetPhysicalDeviceFeatures2(physicalDevice, &deviceFeatures);
  
@@ -377,7 +474,7 @@ index 2800022..caadf00 100644
          // Check for properties.
          if (rayTracingFound) {
              rtPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
-@@ -3932,6 +4149,20 @@ namespace plume {
+@@ -3932,6 +4183,20 @@ namespace plume {
              createDeviceChain = &indexingFeatures;
          }
  
@@ -398,7 +495,32 @@ index 2800022..caadf00 100644
          const bool scalarBlockLayoutSupported = layoutFeatures.scalarBlockLayout;
          if (scalarBlockLayoutSupported) {
              layoutFeatures.pNext = createDeviceChain;
-@@ -4128,6 +4359,7 @@ namespace plume {
+@@ -4006,6 +4271,24 @@ namespace plume {
+         pickFamilyQueue(RenderCommandListType::COMPUTE, VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT);
+         pickFamilyQueue(RenderCommandListType::COPY, VK_QUEUE_TRANSFER_BIT);
+ 
++#if defined(__ANDROID__)
++        // RT64 and the frontend share EXCLUSIVE resources but do not record queue
++        // family release/acquire transfers. Keep all Android work in the graphics
++        // family (which was required to support graphics, compute and transfer).
++        // Virtual queues within that family and their existing synchronization remain.
++        const uint32_t sharedFamily = queueFamilyIndices[toFamilyIndex(RenderCommandListType::DIRECT)];
++        queueFamilyIndices[toFamilyIndex(RenderCommandListType::COMPUTE)] = sharedFamily;
++        queueFamilyIndices[toFamilyIndex(RenderCommandListType::COPY)] = sharedFamily;
++        std::fill(queueFamilyUsed.begin(), queueFamilyUsed.end(), false);
++        queueFamilyUsed[sharedFamily] = true;
++        fprintf(stderr, "[plume] Android shared queue family=%u flags=0x%X availableQueues=%u; all EXCLUSIVE resources remain in this family.\n",
++            sharedFamily, queueFamilyProperties[sharedFamily].queueFlags, queueFamilyProperties[sharedFamily].queueCount);
++        for (uint32_t i = 0; i < queueFamilyCount; ++i) {
++            fprintf(stderr, "[plume] offered queue family=%u flags=0x%X count=%u\n", i,
++                queueFamilyProperties[i].queueFlags, queueFamilyProperties[i].queueCount);
++        }
++#endif
++
+         // Create the struct to store the virtual queues.
+         queueFamilies.resize(queueFamilyCount);
+ 
+@@ -4128,6 +4411,7 @@ namespace plume {
          capabilities.displayTiming = supportedOptionalExtensions.find(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) != supportedOptionalExtensions.end();
          capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
          capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
@@ -406,7 +528,7 @@ index 2800022..caadf00 100644
          capabilities.dynamicDepthBias = true;
          capabilities.queryPools = true;
          capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
-@@ -4453,17 +4685,47 @@ namespace plume {
+@@ -4453,17 +4737,47 @@ namespace plume {
  
      // VulkanInterface
  
@@ -519,3 +641,45 @@ index 0000000..44a2a49
 +    return current;
 +}
 +}
+diff --git a/plume_android_failure.h b/plume_android_failure.h
+new file mode 100644
+index 0000000..35508db
+--- /dev/null
++++ b/plume_android_failure.h
+@@ -0,0 +1,36 @@
++#pragma once
++#ifdef __ANDROID__
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <mutex>
++namespace plume {
++// A failed GPU submission cannot safely be followed by waits, draws or teardown
++// GPU waits. Stop the isolated game process; the launcher and app data survive.
++[[noreturn]] inline void failAndroidVulkan(const char* operation, int32_t result,
++    uint32_t queueType = 0, uint32_t familyIndex = UINT32_MAX) {
++    static std::mutex failureMutex;
++    const std::lock_guard lock(failureMutex);
++    const char* reason = result == -4 ? "VK_ERROR_DEVICE_LOST" : result == 2 ? "VK_TIMEOUT" : "Vulkan failure";
++    char message[1024];
++    std::snprintf(message, sizeof(message),
++        "Graphics stopped after %s.\nOperation: %s; VkResult=%d (0x%X); queueType=%u; family=%u.\n"
++        "The game process is exiting to prevent invalid GPU work. Copy or save the crash report in the launcher.\n",
++        reason, operation, result, static_cast<uint32_t>(result), queueType, familyIndex);
++    std::fprintf(stderr, "[plume] FATAL: %s", message);
++    if (const char* dir = std::getenv("APP_FOLDER_PATH")) {
++        char path[4096];
++        int n = std::snprintf(path, sizeof(path), "%s/graphics-failure.txt", dir);
++        if (n > 0 && n < static_cast<int>(sizeof(path))) {
++            if (FILE* file = std::fopen(path, "w")) {
++                std::fputs(message, file);
++                std::fclose(file);
++            }
++        }
++    }
++    std::fflush(stderr);
++    std::fflush(stdout);
++    std::_Exit(EXIT_FAILURE);
++}
++}
++#endif
