@@ -1,25 +1,30 @@
-# Native Android debug APK — Android.2
+# Native Android diagnostic APK — Android.3
 
 [Download BM64-Android-debug.apk](https://raw.githubusercontent.com/narmanb/BM64Recomp-Android/android-port/downloads/BM64-Android-debug.apk)
 
-Package: `com.narmanb.bm64`, version `1.0.0-android.2`, arm64-v8a, Android API28+.
+Package: `com.narmanb.bm64`, version `1.0.0-android.3`, arm64-v8a, Android API28+.
 
-This is the full native recompiled game build for device testing. It includes no ROM.
-Install over Android.1 to retain your imported ROM and settings: the package and
-signing certificate match. For a new installation, select your compatible Bomberman
-64 USA retail ROM, tap Start, then Start Game in the native frontend.
+This is the full native recompiled game build with additional startup diagnostics.
+It contains no ROM. Install over Android.1/Android.2 to retain ROM and settings;
+the package and signing certificate match.
 
-Android.2 fixes the SDL/EGL native-window ownership conflict behind the reported
-Galaxy S25+ `VK_ERROR_NATIVE_WINDOW_IN_USE_KHR` startup failure. The graphics settings
-dialog now scrolls in landscape. Both changes still need a physical-device retest.
+The user reports Android.2 no longer crashes on Start but stays black. Android.3
+logs the missing shader compilation and first-frame GPU/presentation stages.
+**This is a diagnostic build, not a confirmed fix for the black screen.**
 
-Full Gradle build, real-ROM import/input tests, production Vulkan window regression,
-APK signature, JNI exports, ARM64 ABI and 16 KiB alignment checks passed. Successful
-device gameplay, audio, saves, Vulkan recovery and FPS remain unverified. If startup
-closes, reopen the launcher and Save crash report; confirm Android.2 in the report.
+Tap Start, wait about 30 seconds, then Android Back → Return to launcher → Copy
+Crash Report. Paste that report even if there was no crash. If Back does not respond,
+use Android Home and reopen the launcher. Do not tap Start again before copying:
+a new attempt clears the previous attempt's startup log.
 
-SHA-256: `db61050879975853daacb9132b7dbf003cdb0adf387d79640cb51159acc070da`.
+Full Gradle build, existing real-ROM import/input/touch checks, APK v2 signature,
+matching update certificate, JNI exports, ARM64 ABI, 16 KiB alignment and ROM
+exclusion checks passed. New diagnostic markers are present in the packaged game
+library. Device title screen/gameplay, audio, saves, lifecycle and FPS remain
+unverified; root cause and repair of the current black screen await device logs.
+
+SHA-256: `b6caa3753363c38146591613e2f8b5aef4ce4465a932029b59110e9804d260d5`.
 
 Source/build status and instructions: [ANDROID_PORT.md](../docs/ANDROID_PORT.md).
-This APK was built from the source at commit `3e7715d`. It is hosted here because
+This APK was built from the source at commit `478b2d8`. It is hosted here because
 cloud release asset uploads are unavailable; later builds can move to GitHub Releases.
